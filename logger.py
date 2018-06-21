@@ -17,7 +17,7 @@ if not os.path.exists(log_dir):
 	os.makedirs(log_dir)
 log_path = log_dir + '/' + os.path.basename(sys.argv[0]) + '.log'		
 
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+formatter = logging.Formatter(fmt='%(asctime)s %(filename)s(%(lineno)d) %(levelname)s %(message)s', datefmt='%Y-%m-%d,%H:%M:%S')
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
 

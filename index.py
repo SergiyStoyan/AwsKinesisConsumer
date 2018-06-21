@@ -9,15 +9,35 @@ import boto3
 #import time
 
 def Execute(stream_name):
-        LOG.info('STARTED: ' + os.path.basename(__file__))
+        LOG.info('STARTED')
+        
+        # client = boto3.client(
+               # service_name = 'kinesisvideo',
+               # region_name = settings.REGION_NAME
+        # )
+        # LOG.info(
+               # client.list_streams(
+               # )
+        # )
+
+        client = boto3.client(
+                service_name = 'kinesisvideo',
+                region_name = settings.REGION_NAME
+        )
+        response = client.get_data_endpoint(
+                StreamName = stream_name,
+                APIName = 'GET_MEDIA'
+        )
+        endpoint_url = response['DataEndpoint']
+        LOG.info(
+			endpoint_url
+		)
         
         client = boto3.client(
                 service_name = 'kinesis-video-media',
-                aws_access_key_id = settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key = settings.AWS_SECRET_ACCESS_KEY,
-                region_name = settings.REGION_NAME
+                endpoint_url = endpoint_url,
+                region_name = settings.REGION_NAME,
         )
-
         response = client.get_media(
                 StreamName = stream_name,
                 StartSelector = {
@@ -30,7 +50,7 @@ def Execute(stream_name):
 
 if __name__ == '__main__':#not to run when this module is being imported
 	import sys
-	stream_name = 'test8'
+	stream_name = 'test'
 	if len(sys.argv) > 1:
 		stream_name = sys.argv[1]
 	Execute(stream_name = stream_name)
