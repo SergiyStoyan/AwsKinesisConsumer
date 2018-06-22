@@ -13,6 +13,7 @@ import numpy as np
 #import Image
 import subprocess as sp
 import signal
+import threading
 
 class Parser:
         
@@ -31,6 +32,7 @@ class Parser:
                 self.ffmpeg_process.terminate()
                 os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
 
+        lock = threading.Lock()
 
         MaxFrameNumber = 10
         TimeSpanBetweenFramesInSecs = -1
@@ -185,28 +187,30 @@ class Parser:
                         frame_count = 0
                         next_frame_time = 0.0
                         while frame:
-                                frame_count += 1
-                                if self.TimeSpanBetweenFramesInSecs <= 0 or next_frame_time <= time.time():
-                                        next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
+                                if self.catch_frames:
+                                        frame_count += 1
+                                        if self.TimeSpanBetweenFramesInSecs <= 0 or next_frame_time <= time.time():
+                                                next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
 
-                                        if self.SaveFrames2Disk:
-                                                frame_file = frame_dir + "/frame%d.png" % frame_count
-                                        LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
-                                        
-                                        image = np.fromstring(frame, np.uint8)
-                                        image = image.reshape((1080,1920,3))
-                                        #image2 = cv2.imdecode(image, cv2.CV_LOAD_IMAGE_COLOR)                                
-                                        
-                                        self.Frames.append({'image':image, 'time':time.time(), 'file':frame_file})
-                                        if len(self.Frames) > self.MaxFrameNumber:
-                                                i = self.Frames[0]
-                                                if os.path.isfile(i['file']):
-                                                        os.remove(i['file'])
-                                                del self.Frames[0]
+                                                if self.SaveFrames2Disk:
+                                                        frame_file = frame_dir + "/frame%d.png" % frame_count
+                                                LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
                                                 
-                                        if self.SaveFrames2Disk:
-                                                cv2.imwrite(frame_file, image)
-                                        #image.save("frame_%d.jpg" % frame_count, image)
+                                                image = np.fromstring(frame, np.uint8)
+                                                image = image.reshape((1080,1920,3))
+                                                #image2 = cv2.imdecode(image, cv2.CV_LOAD_IMAGE_COLOR)                                
+
+                                                with self.lock:
+                                                        self.Frames.append({'image':image, 'time':time.time(), 'file':frame_file})                                        
+                                                        if len(self.Frames) > self.MaxFrameNumber:
+                                                                i = self.Frames[0]
+                                                                if os.path.isfile(i['file']):
+                                                                        os.remove(i['file'])
+                                                                del self.Frames[0]
+                                                        
+                                                if self.SaveFrames2Disk:
+                                                        cv2.imwrite(frame_file, image)
+                                                #image.save("frame_%d.jpg" % frame_count, image)
                                                 
                                 frame = ffmpeg_process.stdout.read(FRAME_SIZE)
 
@@ -221,16 +225,30 @@ class Parser:
                 LOG.info('exiting frame_parser')
 
         Frames = []
-
                                 
-	def GetLastFrame(self, 
+	def GetFrame(self,
+                     index = -1  #last one
 	):
-		try:
-                        l = len(self.Frames)
-                        if l > 0:
-                                return self.Frames[l - 1]                        
-		except:
-			LOG.exception(sys.exc_info()[0])
+                with self.lock:
+                        try:                
+                                l = len(self.Frames)
+                                if index >= l:
+                                        return
+                                if index < 0:
+                                        index = l - 1
+                                return self.Frames[index]                        
+                        except:
+                                LOG.exception(sys.exc_info()[0])
+
+        catch_frames = True
+	
+	def Suspend(self,
+	):
+               self.catch_frames = False
+               
+	def Resume(self,
+	):
+               self.catch_frames = True
 
         
 
@@ -243,7 +261,22 @@ if __name__ == '__main__':#not to run when this module is being imported
                 time_span_between_frames_in_secs = 0.3,
                 max_frame_number = 20
                 ) as p:
-                time.sleep(10)
-                f = p.GetLastFrame()
+                
+                time.sleep(3)
+                f = p.GetFrame(0)#thread safe method
+                print("First frame: (%d), %s\r\n" % (f['time'], f['file']))
+
+                time.sleep(3)
+                f = p.GetFrame()#last frame
+                print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
+
+                p.Suspend()
+                #p.Frames must be accessed only after Suspend() to avoid concurrency!!!
+                for f in p.Frames:
+                        print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
+                
+                p.Resume()
+                time.sleep(1)
+                f = p.GetFrame()#last frame
                 print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
         exit()
