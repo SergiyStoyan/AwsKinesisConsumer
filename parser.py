@@ -59,6 +59,7 @@ class Parser:
                                # )
                         # )
 
+                        LOG.info('requesting kinesis get_data_endpoint')
                         client = boto3.client(
                                 service_name = 'kinesisvideo',
                                 region_name = settings.REGION_NAME
@@ -67,9 +68,10 @@ class Parser:
                                 StreamName = stream_name,
                                 APIName = 'GET_MEDIA'
                         )
+                        LOG.info('response: ' + format(response))
                         endpoint_url = response['DataEndpoint']
-                        LOG.info('endpoint_url: ' + endpoint_url)
                         
+                        LOG.info('requesting kinesis get_media')
                         client = boto3.client(
                                 service_name = 'kinesis-video-media',
                                 endpoint_url = endpoint_url,
@@ -81,8 +83,8 @@ class Parser:
                                         'StartSelectorType': 'NOW',
                                 }
                         )
+                        LOG.info('response: ' + format(response))
                         kinesis_stream = response['Payload']
-                        LOG.info('kinesis_stream: ' + str(kinesis_stream))
                         
                         LOG.info('starting kinesis_stream_reader')
                         from threading import Thread
@@ -125,7 +127,14 @@ class Parser:
                                 #'http://localhost:8090/cam2.ffm'
                         ]
                         LOG.info('starting ffmpeg_process')
-                        self.ffmpeg_process = sp.Popen(cmd, stdin=sp.PIPE, stdout = sp.PIPE, bufsize=10**8, preexec_fn=os.setsid)
+                        self.ffmpeg_process = sp.Popen(cmd,
+                                                       stdin=sp.PIPE,
+                                                       stdout=sp.PIPE,
+                                                       #stderr=sp.PIPE,
+                                                       bufsize=10**8,
+                                                       preexec_fn=os.setsid
+                                                )
+                        #self.ffmpeg_process.communicate()
                         
                         LOG.info('starting frame_parser')
                         from threading import Thread
@@ -167,6 +176,9 @@ class Parser:
                                 import shutil
                                 shutil.rmtree(frame_dir) 
                         os.makedirs(frame_dir)
+
+                        #s = self.ffmpeg_process.stderr.read(100)
+                        #LOG.info(s)
 
                         FRAME_SIZE = 1920 * 1080 * 3
                         frame = ffmpeg_process.stdout.read(FRAME_SIZE)
