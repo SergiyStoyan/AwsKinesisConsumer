@@ -34,21 +34,21 @@ class Parser:
 
         lock = threading.Lock()
 
-        MaxFrameNumber = 10
+        FrameQueueMaxLength = 10
         TimeSpanBetweenFramesInSecs = -1
         SaveFrames2Disk = True
             
 	def __init__(self,
                      stream_name,
                      time_span_between_frames_in_secs = -1,
-                     max_frame_number = 10,
+                     frame_queue_max_length = 10,
                      save_frames2disk = True
                      ):		                             
 		try:
                         LOG.info('STARTED')
                         LOG.info('stream_name: ' + stream_name)
                         
-                        self.MaxFrameNumber = max_frame_number
+                        self.FrameQueueMaxLength = frame_queue_max_length
                         self.TimeSpanBetweenFramesInSecs = time_span_between_frames_in_secs
                         self.SaveFrames2Disk = save_frames2disk
                         
@@ -202,7 +202,7 @@ class Parser:
 
                                                 with self.lock:
                                                         self.Frames.append({'image':image, 'time':time.time(), 'file':frame_file})                                        
-                                                        if len(self.Frames) > self.MaxFrameNumber:
+                                                        if len(self.Frames) > self.FrameQueueMaxLength:
                                                                 i = self.Frames[0]
                                                                 if os.path.isfile(i['file']):
                                                                         os.remove(i['file'])
@@ -259,7 +259,7 @@ if __name__ == '__main__':#not to run when this module is being imported
 	with Parser(
                 stream_name = 'test8',
                 time_span_between_frames_in_secs = 0.3,
-                max_frame_number = 20
+                frame_queue_max_length = 20
                 ) as p:
                 
                 time.sleep(3)
