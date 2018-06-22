@@ -204,7 +204,7 @@ class Parser:
                                                         self.Frames.append({'image':image, 'time':time.time(), 'file':frame_file})                                        
                                                         if len(self.Frames) > self.FrameQueueMaxLength:
                                                                 i = self.Frames[0]
-                                                                if os.path.isfile(i['file']):
+                                                                try:# file can be in use or deleted
                                                                         os.remove(i['file'])
                                                                 del self.Frames[0]
                                                         
@@ -260,6 +260,7 @@ if __name__ == '__main__':#not to run when this module is being imported
                 stream_name = 'test8',
                 time_span_between_frames_in_secs = 0.3,
                 frame_queue_max_length = 20
+                save_frames2disk = True
                 ) as p:
                 
                 time.sleep(3)
