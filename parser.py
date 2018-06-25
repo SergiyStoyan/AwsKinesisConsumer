@@ -96,8 +96,6 @@ class Parser:
 		except:
 			LOG.exception(sys.exc_info()[0])
 
-                
-
         
         run_kinesis_stream_reader = True
         ffmpeg_process = None
@@ -106,6 +104,42 @@ class Parser:
                                 ):              
 		try:    
                         LOG.info('kinesis_stream_reader started')
+
+                        #getting frame size
+##                        cmd = [
+##                                'ffprobe',
+##                                '-i', 'pipe:0',
+##                                '-v', 'error,
+##                                '-show_entries', 'stream=width,height',
+##                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
+##                        ]
+##                        LOG.info('starting ffprobe')
+##                        ffprobe_process = sp.Popen(cmd,
+##                                                       stdin=sp.PIPE,
+##                                                       stdout=sp.PIPE,
+##                                                       #stderr=sp.PIPE,
+##                                                       bufsize=10**8,
+##                                                       preexec_fn=os.setsid
+##                                                )
+##                        #self.ffmpeg_process.communicate()    
+##                        
+##                        READ_BUFFER_SIZE = 1000000
+##                        total_bytes = 0
+##                        data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+##                        while data:
+##                                total_bytes += len(data)
+##                                print('Kinesis: ' + format(total_bytes))
+##                                self.ffprobe_process.stdin.write(data)
+##                                self.ffprobe_process.stdin.flush()
+##                                
+##                                data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+##
+##                                if not self.run_kinesis_stream_reader:
+##                                        LOG.info('NOT self.run_kinesis_stream_reader')
+##                                        break                     
+
+                        
+                        
                         
                         cmd = [
                                 'ffmpeg',
@@ -206,6 +240,8 @@ class Parser:
                                                                 i = self.Frames[0]
                                                                 try:# file can be in use or deleted
                                                                         os.remove(i['file'])
+                                                                except:
+                                                                        pass
                                                                 del self.Frames[0]
                                                         
                                                 if self.SaveFrames2Disk:
@@ -259,17 +295,19 @@ if __name__ == '__main__':#not to run when this module is being imported
 	with Parser(
                 stream_name = 'test8',
                 time_span_between_frames_in_secs = 0.3,
-                frame_queue_max_length = 20
+                frame_queue_max_length = 20,
                 save_frames2disk = True
                 ) as p:
                 
                 time.sleep(3)
                 f = p.GetFrame(0)#thread safe method
-                print("First frame: (%d), %s\r\n" % (f['time'], f['file']))
+                if f is not None:
+                        print("First frame: (%d), %s\r\n" % (f['time'], f['file']))
 
                 time.sleep(3)
                 f = p.GetFrame()#last frame
-                print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
+                if f is not None:
+                        print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
 
                 p.Suspend()
                 #p.Frames must be accessed only after Suspend() to avoid concurrency!!!
@@ -279,5 +317,6 @@ if __name__ == '__main__':#not to run when this module is being imported
                 p.Resume()
                 time.sleep(1)
                 f = p.GetFrame()#last frame
-                print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
+                if f is not None:
+                        print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
         exit()
