@@ -21,9 +21,23 @@ class Parser:
                 return self
 
         def __exit__(self, exc_type, exc_value, traceback):
+                self.dispose()
+
+        disposed = False
+        def dispose(self):
+                if self.disposed:
+                        return
+                self.disposed = True
                 LOG.info('Shutting down Parser...')
-                                
+                
+                self.run_kinesis_stream_reader = False
+                
                 self.run_frame_parser = False
+
+                #self.ffmpeg_process.stdin.close()
+                self.ffmpeg_process.kill()
+                self.ffmpeg_process.terminate()
+                os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
 
         lock = threading.Lock()
 
@@ -81,18 +95,134 @@ class Parser:
                         LOG.info('response: ' + format(response))
                         kinesis_stream = response['Payload']
                         
-                        LOG.info('starting frame_parser')
+                        LOG.info('starting kinesis_stream_reader')
                         from threading import Thread
-                        kinesis_stream_reader_thread = Thread(target = self.frame_parser, args = (kinesis_stream, ))
+                        kinesis_stream_reader_thread = Thread(target = self.kinesis_stream_reader, args = (kinesis_stream, ))
                         self.run_kinesis_stream_reader = True
                         kinesis_stream_reader_thread.start()                 
 		except:
 			LOG.exception(sys.exc_info()[0])
+		finally:
+                        pass
+
+        
+        run_kinesis_stream_reader = True
+        ffmpeg_process = None
+        def kinesis_stream_reader(self,
+                                kinesis_stream
+                                ):              
+		try:    
+                        LOG.info('kinesis_stream_reader started')
+
+                        #getting frame size
+##                        cmd = [
+##                                'ffprobe',
+##                                '-i', 'pipe:0',
+##                                '-v', 'error,
+##                                '-show_entries', 'stream=width,height',
+##                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
+##                        ]
+##                        LOG.info('starting ffprobe')
+##                        ffprobe_process = sp.Popen(cmd,
+##                                                       stdin=sp.PIPE,
+##                                                       stdout=sp.PIPE,
+##                                                       #stderr=sp.PIPE,
+##                                                       bufsize=10**8,
+##                                                       preexec_fn=os.setsid
+##                                                )
+##                        #self.ffmpeg_process.communicate()    
+##                        
+##                        READ_BUFFER_SIZE = 1000000
+##                        total_bytes = 0
+##                        data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+##                        while data:
+##                                total_bytes += len(data)
+##                                print('Kinesis: ' + format(total_bytes))
+##                                self.ffprobe_process.stdin.write(data)
+##                                self.ffprobe_process.stdin.flush()
+##                                
+##                                data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+##
+##                                if not self.run_kinesis_stream_reader:
+##                                        LOG.info('NOT self.run_kinesis_stream_reader')
+##                                        break                     
+
+                        
+                        
+                        
+                        cmd = [
+                                'ffmpeg',
+                                '-i', 'pipe:0',
+                                #'-i -',
+                                '-pix_fmt', 'bgr24',      # opencv requires bgr24 pixel format.
+                                '-vcodec', 'rawvideo',
+                                '-an', '-sn',              # we want to disable audio processing (there is no audio)
+                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
+                                #'pipe:1'
+                                #"-ss", "0"
+                                #"-vframes", "1" #only once
+                                #"-vf fps", "1" #every 1 sec
+                                #"-v", "warning",
+                                #"-strict", "experimental",
+                                #"-vf", "{0}, {1}".format(box, draw_text),
+                                #"-y",
+                                #"-f", "mp4",
+                                #"-movflags", "frag_keyframe",
+                                #"output.png"
+                                #'http://localhost:8090/cam2.ffm'
+                        ]                           
+                        cmd = [
+                                'ffmpeg',
+                                '-i', 'pipe:0',
+                                #'-c',  'copy',
+                                #'-map_metadata', '0',
+                                #'-map_metadata:s:v', '0:s:v',
+                                #'-map_metadata:s:a', '0:s:a',
+                                '-f', 'ffmetadata', 'metadata.txt'
+                        ]
+                        LOG.info('starting ffmpeg_process')
+                        self.ffmpeg_process = sp.Popen(cmd,
+                                                       stdin=sp.PIPE,
+                                                       stdout=sp.PIPE,
+                                                       #stderr=sp.PIPE,
+                                                       bufsize=10**8,
+                                                       preexec_fn=os.setsid
+                                                )
+                        #self.ffmpeg_process.communicate()
+                        
+                        LOG.info('starting frame_parser')
+                        from threading import Thread
+                        frame_parser_thread = Thread(target = self.frame_parser, args = (self.ffmpeg_process, ))                
+                        self.run_frame_parser = True
+                        #frame_parser_thread.start()                
+                        
+                        READ_BUFFER_SIZE = 1000000
+                        total_bytes = 0
+                        data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+                        while data:
+                                total_bytes += len(data)
+                                print('Kinesis: ' + format(total_bytes))
+                                self.ffmpeg_process.stdin.write(data)
+                                self.ffmpeg_process.stdin.flush()
+                                
+                                data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
+
+                                if not self.run_kinesis_stream_reader:
+                                        LOG.info('NOT self.run_kinesis_stream_reader')
+                                        break                     
+		except:
+			LOG.exception(sys.exc_info()[0])
+		finally:
+                        LOG.info('exiting kinesis_stream_reader')
+                        self.dispose()
+
+
+
 
 
         run_frame_parser = True                
         def frame_parser(self,
-                      stream
+                      ffmpeg_process
                       ):                
 		try:
                         LOG.info('frame_parser started')
@@ -103,19 +233,14 @@ class Parser:
                                 shutil.rmtree(frame_dir) 
                         os.makedirs(frame_dir)
 
+                        #s = self.ffmpeg_process.stderr.read(100)
+                        #LOG.info(s)
 
-                        w = 1920
-                        h = 1080
-                        #import yuvtorgb   ###convert
-
-                        
-                        #FRAME_SIZE = 1920 * 1080 * 3
-                        FRAME_SIZE = (int)(w * h * 1.5)  #YUV420p which uses 1.5 bytes per pixel
-                        frame = stream.read(FRAME_SIZE)
+                        FRAME_SIZE = 1920 * 1080 * 3
+                        frame = ffmpeg_process.stdout.read(FRAME_SIZE)
                         frame_count = 0
                         next_frame_time = 0.0
                         while frame:
-                                print("frame%d." % frame_count)
                                 if self.catch_frames:
                                         frame_count += 1
                                         if self.TimeSpanBetweenFramesInSecs <= 0 or next_frame_time <= time.time():
@@ -124,20 +249,14 @@ class Parser:
                                                 if self.SaveFrames2Disk:
                                                         frame_file = frame_dir + "/frame%d.png" % frame_count
                                                 LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
-
-                                                #bgr = yuvtorgb.i420_to_bgr24(yuv, w, h)
-                                                image = np.frombuffer(frame, dtype=np.uint8)
-                                                image = image.reshape((int(h * 1.5), int(w * ), 3))
-                                                image = cv2.cvtColor(image, cv2.COLOR_YUV2BGR_NV21)
-        
-      
-                                                #image = np.fromstring(frame, np.uint8)
-                                                #image = image.reshape((1080, 1920, 3))
+                                                
+                                                image = np.fromstring(frame, np.uint8)
+                                                image = image.reshape((1080,1920,3))
                                                 #image2 = cv2.imdecode(image, cv2.CV_LOAD_IMAGE_COLOR)                                
 
                                                 with self.lock:
                                                         self.Frames.append({'image':image, 'time':time.time(), 'file':frame_file})                                        
-                                                        while len(self.Frames) > self.FrameQueueMaxLength:
+                                                        if len(self.Frames) > self.FrameQueueMaxLength:
                                                                 i = self.Frames[0]
                                                                 try:# file can be in use or deleted
                                                                         os.remove(i['file'])
@@ -149,7 +268,7 @@ class Parser:
                                                         cv2.imwrite(frame_file, image)
                                                 #image.save("frame_%d.jpg" % frame_count, image)
                                                 
-                                frame = stream.read(FRAME_SIZE)
+                                frame = ffmpeg_process.stdout.read(FRAME_SIZE)
 
                                 if cv2.waitKey(1) & 0xFF == ord('q'):# Press 'q' to quit
                                         LOG.info('Ctrl+C')
@@ -159,7 +278,9 @@ class Parser:
                                         break                     
 		except:
 			LOG.exception(sys.exc_info()[0])
-                LOG.info('exiting frame_parser')
+		finally:
+                        LOG.info('exiting frame_parser')
+                        self.dispose()
 
         Frames = []
                                 
@@ -216,7 +337,7 @@ if __name__ == '__main__':#not to run when this module is being imported
                         print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
                 
                 p.Resume()
-                time.sleep(1)
+                time.sleep(10)
                 f = p.GetFrame()#last frame
                 if f is not None:
                         print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
