@@ -21,23 +21,11 @@ class Parser:
                 return self
 
         def __exit__(self, exc_type, exc_value, traceback):
-                self.dispose()
-
-        disposed = False
-        def dispose(self):
-                if self.disposed:
-                        return
-                self.disposed = True
                 LOG.info('Shutting down Parser...')
                 
                 self.run_kinesis_stream_reader = False
                 
                 self.run_frame_parser = False
-
-                #self.ffmpeg_process.stdin.close()
-                self.ffmpeg_process.kill()
-                self.ffmpeg_process.terminate()
-                os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
 
         lock = threading.Lock()
 
@@ -102,8 +90,6 @@ class Parser:
                         kinesis_stream_reader_thread.start()                 
 		except:
 			LOG.exception(sys.exc_info()[0])
-		finally:
-                        pass
 
         
         run_kinesis_stream_reader = True
@@ -114,89 +100,45 @@ class Parser:
 		try:    
                         LOG.info('kinesis_stream_reader started')
 
-                        #getting frame size
-##                        cmd = [
-##                                'ffprobe',
-##                                '-i', 'pipe:0',
-##                                '-v', 'error,
-##                                '-show_entries', 'stream=width,height',
-##                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
-##                        ]
-##                        LOG.info('starting ffprobe')
-##                        ffprobe_process = sp.Popen(cmd,
-##                                                       stdin=sp.PIPE,
-##                                                       stdout=sp.PIPE,
-##                                                       #stderr=sp.PIPE,
-##                                                       bufsize=10**8,
-##                                                       preexec_fn=os.setsid
-##                                                )
-##                        #self.ffmpeg_process.communicate()    
-##                        
-##                        READ_BUFFER_SIZE = 1000000
-##                        total_bytes = 0
-##                        data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
-##                        while data:
-##                                total_bytes += len(data)
-##                                print('Kinesis: ' + format(total_bytes))
-##                                self.ffprobe_process.stdin.write(data)
-##                                self.ffprobe_process.stdin.flush()
-##                                
-##                                data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
-##
-##                                if not self.run_kinesis_stream_reader:
-##                                        LOG.info('NOT self.run_kinesis_stream_reader')
-##                                        break                     
+                        pipe = r'/tmp/testFifo'
+                        print pipe
+                        try:                                
+                                os.remove(pipe)
+                        except:
+                                pass
+                        try:
+                                os.mkfifo(pipe)
+                        except OSError, e:
+                                print "Failed to create FIFO: %s" % e
+                                return
 
-                        
-                        
-                        
-                        cmd = [
-                                'ffmpeg',
-                                '-i', 'pipe:0',
-                                #'-i -',
-                                '-pix_fmt', 'bgr24',      # opencv requires bgr24 pixel format.
-                                '-vcodec', 'rawvideo',
-                                '-an', '-sn',              # we want to disable audio processing (there is no audio)
-                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
-                                #'pipe:1'
-                                #"-ss", "0"
-                                #"-vframes", "1" #only once
-                                #"-vf fps", "1" #every 1 sec
-                                #"-v", "warning",
-                                #"-strict", "experimental",
-                                #"-vf", "{0}, {1}".format(box, draw_text),
-                                #"-y",
-                                #"-f", "mp4",
-                                #"-movflags", "frag_keyframe",
-                                #"output.png"
-                                #'http://localhost:8090/cam2.ffm'
-                        ]
-                        LOG.info('starting ffmpeg_process')
-                        self.ffmpeg_process = sp.Popen(cmd,
-                                                       stdin=sp.PIPE,
-                                                       stdout=sp.PIPE,
-                                                       #stderr=sp.PIPE,
-                                                       bufsize=10**8,
-                                                       preexec_fn=os.setsid
-                                                )
-                        #self.ffmpeg_process.communicate()
                         
                         LOG.info('starting frame_parser')
                         from threading import Thread
-                        frame_parser_thread = Thread(target = self.frame_parser, args = (self.ffmpeg_process, ))                
+                        frame_parser_thread = Thread(target = self.frame_parser, args = (pipe, ))                
                         self.run_frame_parser = True
-                        frame_parser_thread.start()                
+                        frame_parser_thread.start()
                         
-                        READ_BUFFER_SIZE = 1000000
+                        #time.sleep(3)
+                        print('opening pipe')
+                        #fd = os.open(pipe, os.O_NONBLOCK | os.O_WRONLY)
+                        #fifo = os.fdopen(fd, 'w')
+                        fifo = open(pipe, 'w')
+                        if fifo is None:
+                                print('pipe NOT opened')
+                                return
+                        print('pipe opened')               
+                        #time.sleep(10)
+                        
+                        READ_BUFFER_SIZE = 100000
                         total_bytes = 0
                         data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
                         while data:
                                 total_bytes += len(data)
                                 print('Kinesis: ' + format(total_bytes))
-                                self.ffmpeg_process.stdin.write(data)
-                                self.ffmpeg_process.stdin.flush()
-                                #self.ffmpeg_process.stdout.flush()
-                                
+                                fifo.write(data)
+                                fifo.flush()
+                                #time.sleep(5)
                                 data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
 
                                 if not self.run_kinesis_stream_reader:
@@ -206,15 +148,16 @@ class Parser:
 			LOG.exception(sys.exc_info()[0])
 		finally:
                         LOG.info('exiting kinesis_stream_reader')
-                        self.dispose()
-
+                        run_frame_parser = False
+                        if fifo is not None:
+                                fifo.close()
 
 
 
 
         run_frame_parser = True                
         def frame_parser(self,
-                      ffmpeg_process
+                      pipe
                       ):                
 		try:
                         LOG.info('frame_parser started')
@@ -228,11 +171,29 @@ class Parser:
                         #s = self.ffmpeg_process.stderr.read(100)
                         #LOG.info(s)
 
-                        FRAME_SIZE = 1920 * 1080 * 3
-                        frame = ffmpeg_process.stdout.read(FRAME_SIZE)
                         frame_count = 0
                         next_frame_time = 0.0
-                        while frame:
+                        LOG.info('Fifo: ' + pipe)
+                        print('opening pipe2')
+                        #fd = os.open(pipe, os.O_NONBLOCK | os.O_RDONLY)
+                        fifo2 = open(pipe, 'r')
+                        cap = cv2.VideoCapture(pipe)
+                        #os.close(fd)
+                        print('cap created!')
+                        while True:
+                                print('!!!pipe2 opened')
+                                ret, frame = cap.read()
+                                if ret == False:
+                                        break
+                                frame_count += 1
+                                frame_file = frame_dir + "/frame%d.png" % frame_count
+                                LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
+                                cv2.imwrite(frame_file, image)
+                                continue
+
+                                
+
+                                
                                 if self.catch_frames:
                                         frame_count += 1
                                         if self.TimeSpanBetweenFramesInSecs <= 0 or next_frame_time <= time.time():
@@ -260,7 +221,7 @@ class Parser:
                                                         cv2.imwrite(frame_file, image)
                                                 #image.save("frame_%d.jpg" % frame_count, image)
                                                 
-                                frame = ffmpeg_process.stdout.read(FRAME_SIZE)
+                                #frame = ffmpeg_process.stdout.read(FRAME_SIZE)
 
                                 if cv2.waitKey(1) & 0xFF == ord('q'):# Press 'q' to quit
                                         LOG.info('Ctrl+C')
@@ -270,9 +231,7 @@ class Parser:
                                         break                     
 		except:
 			LOG.exception(sys.exc_info()[0])
-		finally:
-                        LOG.info('exiting frame_parser')
-                        self.dispose()
+                LOG.info('exiting frame_parser')
 
         Frames = []
                                 
@@ -329,7 +288,7 @@ if __name__ == '__main__':#not to run when this module is being imported
                         print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
                 
                 p.Resume()
-                time.sleep(1)
+                time.sleep(100)
                 f = p.GetFrame()#last frame
                 if f is not None:
                         print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
