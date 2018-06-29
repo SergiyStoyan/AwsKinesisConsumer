@@ -1,7 +1,7 @@
 from logger import LOG
 import os
 import sys
-from enzyme.mkv import MKV, VIDEO_TRACK, AUDIO_TRACK, SUBTITLE_TRACK
+#from enzyme.mkv import MKV, VIDEO_TRACK, AUDIO_TRACK, SUBTITLE_TRACK
 import io
 import threading
 #import os.path
@@ -48,9 +48,9 @@ class Mkv:
         try:
             LOG.info('Mkv stream reader started')
 
-            READ_BUFFER_SIZE = 50 * 10**3
+            READ_BUFFER_SIZE = 50 * 10**4
             data = stream.read(amt=READ_BUFFER_SIZE)
-
+            print("=========================%d"%READ_BUFFER_SIZE)
 ##            f = open('test.mkv', 'wb')
 ##            f.write(data)
 ##            f.close()
@@ -60,27 +60,34 @@ class Mkv:
             with io.BytesIO(data) as s:
                 import matroska
                 matroska.dump_tags(s)
+                #from ebml.container import File
+                #ebmlf = File(data)
+                #ebmlf[1].read_data(ebmlf.stream)
+                
                 print("@@@@@@@@@@@@@@@@@@@")
+                # s.seek(0, 0)
+                # size = s.tell()
             
-                mkv = MKV(s)
+                # mkv = MKV(s)
 
-                print(mkv.info.title)
-                print(mkv.info.duration)
-                print(mkv.info.date_utc)
-                print(mkv.info.muxing_app)
-                print(mkv.info.writing_app)
-                print(len(mkv.video_tracks))
-                print(mkv.video_tracks[0].type)
-                print(mkv.video_tracks[0].number)
-                print(mkv.video_tracks[0].name)
-                print(mkv.video_tracks[0].language)
-                print(mkv.video_tracks[0].enabled)
-                print(mkv.video_tracks[0].default)
-                print(mkv.video_tracks[0].forced)
-                print(len(mkv.subtitle_tracks))
-                print(len(mkv.chapters))
-                print(len(mkv.tags))
-                print(len(mkv.tags[0].simpletags))
+                # pprint(mkv)
+                # print(mkv.info.title)
+                # print(mkv.info.duration)
+                # print(mkv.info.date_utc)
+                # print(mkv.info.muxing_app)
+                # print(mkv.info.writing_app)
+                # print(len(mkv.video_tracks))
+                # print(mkv.video_tracks[0].type)
+                # print(mkv.video_tracks[0].number)
+                # print(mkv.video_tracks[0].name)
+                # print(mkv.video_tracks[0].language)
+                # print(mkv.video_tracks[0].enabled)
+                # print(mkv.video_tracks[0].default)
+                # print(mkv.video_tracks[0].forced)
+                # print(len(mkv.subtitle_tracks))
+                # print(len(mkv.chapters))
+                # print(len(mkv.tags))
+                # print(len(mkv.tags[0].simpletags))
 		
         except:
             LOG.exception(sys.exc_info()[0])

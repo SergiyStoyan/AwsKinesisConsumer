@@ -27,12 +27,6 @@ def bchr(n):
 
 
 class Ebml:
-    """EBML parser.
-    Usage: Ebml(location, tags).parse()
-    where `tags` is a dictionary of the form {id: (name, type)}.
-    """
-
-    ## Constructor and destructor
 
     def __init__(self, location, tags):
         self.tags = tags
@@ -41,19 +35,14 @@ class Ebml:
     def __del__(self):
         self.close()
 
-    ## File access.
-    ## These can be overridden to provide network support.
-
-    def open(self, location):
+    def open(self, source):
         try:
-            self.file = f = open(location, 'rb')
-            f = self.file
+            self.file = open(source, 'rb')
         except:
-            print("!!!")
-            self.file = f = location
-        f.seek(0, 2)
-        self.size = f.tell()
-        f.seek(0, 0)
+            self.file = source
+        self.file.seek(0, 2)
+        self.size = self.file.tell()
+        self.file.seek(0, 0)
 
     def seek(self, offset, mode):
         self.file.seek(offset, mode)
@@ -140,65 +129,87 @@ class Ebml:
 
     ## Parsing
 
-    def parse(self, from_=0, to=None):
-        """Parses EBML from `from_` (inclusive) to `to` (exclusive).
-        Note that not all streams support seeking backwards, so prepare to handle
-        an exception if you try to parse from arbitrary position.
-        """
-        if to is None:
-            to = self.size
-        self.seek(from_, 0)
-        node = {}
-        # Iterate over current node's children.
-        while self.tell() < to:
-            try:
-                id = self.readID()
-            except EbmlException as e:
-                # Invalid EBML header. We can't reliably get any more data from
-                # this level, so just return anything we have.
-                warn(EbmlWarning(e))
-                return node
-            size = self.readSize()
-            if size == 0b01111111:
-                warn(EbmlWarning("don't know how to handle unknown-sized element"))
-                size = to - self.tell()
-            try:
-                key, type_ = self.tags[id]
-            except KeyError:
-                self.seek(size, 1)
-                continue
-            try:
-                if type_ is SINT:
-                    value = self.readInteger(size, True)
-                elif type_ is UINT:
-                    value = self.readInteger(size, False)
-                elif type_ is FLOAT:
-                    value = self.readFloat(size)
-                elif type_ is STRING:
-                    value = self.read(size).decode('ascii')
-                elif type_ is UTF8:
-                    value = self.read(size).decode('utf-8')
-                elif type_ is DATE:
-                    us = self.readInteger(size, True) / 1000.0  # ns to us
-                    from datetime import datetime, timedelta
-
-                    value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-                elif type_ is MASTER:
-                    tell = self.tell()
-                    value = self.parse(tell, tell + size)
-                elif type_ is BINARY:
-                    value = BinaryData(self.read(size))
-                else:
-                    assert False, type_
-            except (EbmlException, UnicodeDecodeError) as e:
-                warn(EbmlWarning(e))
-            else:
+    def parse(self, level=0, from_=0, to=None):
+        try:
+            print("LEVEL:%d"%level)
+            if to is None:
+                to = self.size
+            self.seek(from_, 0)
+            node = {}
+            # Iterate over current node's children.
+            while self.tell() < to:
+                print("position1:%d"%self.tell())
                 try:
-                    parentval = node[key]
-                except KeyError:
-                    parentval = node[key] = []
-                parentval.append(value)
-        return node
+                    id = self.readID()
+                except EbmlException as e:
+                    # Invalid EBML header. We can't reliably get any more data from
+                    # this level, so just return anything we have.
+                    warn(EbmlWarning(e))
+                    print("error1")
+                    return node
+                size = self.readSize()
+                if size == 0b01111111:
+                    print("!!!!!!!!!!!don't know how to handle unknown-sized element")
+                    size = to - self.tell()
+                try:
+                    print('++++++++++++%d'%size)
+                    try:
+                        print('id:%x'%id)
+                    except:
+                        pass
+                    key, type_ = self.tags[id]
+                    print(key)
+                    print(type_)
+                except:
+                    print("error2")
+                    print(sys.exc_info()[0])
+                    self.seek(size, 1)
+                    continue
+                try:
+                    if type_ is SINT:
+                        print('SINT')
+                        value = self.readInteger(size, True)
+                    elif type_ is UINT:
+                        print('UINT')
+                        value = self.readInteger(size, False)
+                    elif type_ is FLOAT:
+                        print('FLOAT')
+                        value = self.readFloat(size)
+                    elif type_ is STRING:
+                        print('STRING')
+                        value = self.read(size).decode('ascii')
+                    elif type_ is UTF8:
+                        print('UTF8')
+                        value = self.read(size).decode('utf-8')
+                    elif type_ is DATE:
+                        print('DATE')
+                        us = self.readInteger(size, True) / 1000.0  # ns to us
+                        from datetime import datetime, timedelta
+                        value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+                    elif type_ is MASTER:
+                        print('MASTER')
+                        tell = self.tell()
+                        value = self.parse(level + 1, tell, tell + size)
+                    elif type_ is BINARY:
+                        print('BINARY')
+                        value = BinaryData(self.read(size))
+                    else:
+                        print('---')
+                        assert False, type_
+                except (EbmlException, UnicodeDecodeError) as e:
+                    warn(EbmlWarning(e))
+                    print("error3")
+                else:
+                    try:
+                        parentval = node[key]
+                    except:
+                        print('node zero')
+                        parentval = node[key] = []
+                    parentval.append(value)
+                print("position2:%d"%self.tell())
+            print("END OF LEVEL:%d"%level)
+        finally:
+            return node
 
 
 ## Matroska-specific code
@@ -277,32 +288,32 @@ MatroskaTags = {
     0x4484: ('TagDefault', UINT),
     0x4487: ('TagString', UTF8),
     0x4485: ('TagBinary', BINARY),
+    # Cluster Information
+    0x1f43b675: ('Cluster', MASTER),
+    0xe7 : ('Timecode', UINT),
+    0xa7  : ('Position', UINT),
+    0xab  : ('PrevSize', UINT),
+    #0xa0  : ('BlockGroup',     ),
+    0xa1 : ('Block', BINARY),
+    0xa2  : ('BlockVirtual', BINARY),
+    #0x75a1  : ('BlockAdditions', ),
 }
 
-
-def parse(location):
-    return Ebml(location, MatroskaTags).parse()
-
-
-def dump(location):
-    from pprint import pprint
-
-    pprint(parse(location))
 
 
 def dump_tags(location):
     from pprint import pprint
 
-    mka = parse(location)
-    segment = mka['Segment'][0]
-    info = segment['Info'][0]
+    e = Ebml(location, MatroskaTags)
     try:
-        timecodescale = info['TimecodeScale'][0]
-    except KeyError:
-        timecodescale = 1000000
-    length = info['Duration'][0] * timecodescale / 1e9
-    print("Length = %s seconds" % length)
-    pprint(segment['Tags'][0]['Tag'])
+        mka = e.parse()    
+    except:
+        print(sys.exc_info()[0])
+        print('!!!!!!!!!!!!!!!!')
+    print('###################')
+    #segment = mka['Segment'][0]
+    #pprint(segment['Tags'][0]['Tag'])
+    pprint(mka)
 
 
 
