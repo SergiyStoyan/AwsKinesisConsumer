@@ -1,6 +1,6 @@
 #by Sergey Stoyan: sergey.stoyan@gmail.com
 from logger import LOG
-import _settings as settings
+import settings
 import os
 #import imp
 import boto3

@@ -1,7 +1,8 @@
 #by Sergey Stoyan: sergey.stoyan@gmail.com
 from logger import LOG
-import _settings as settings
+import settings
 import os
+import sys
 #import imp
 import boto3
 #import json
@@ -35,9 +36,11 @@ class Parser:
                 self.run_frame_parser = False
 
                 #self.ffmpeg_process.stdin.close()
-                self.ffmpeg_process.kill()
-                self.ffmpeg_process.terminate()
-                os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
+                if self.ffmpeg_process is not None:
+                        self.ffmpeg_process.kill()
+                        self.ffmpeg_process.terminate()
+                        os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
+
 
         lock = threading.Lock()
 
@@ -94,12 +97,9 @@ class Parser:
                         )
                         LOG.info('response: ' + format(response))
                         kinesis_stream = response['Payload']
-                        
-                        LOG.info('starting kinesis_stream_reader')
-                        from threading import Thread
-                        kinesis_stream_reader_thread = Thread(target = self.kinesis_stream_reader, args = (kinesis_stream, ))
-                        self.run_kinesis_stream_reader = True
-                        kinesis_stream_reader_thread.start()                 
+
+                        import mkv
+                        m = mkv.Mkv(kinesis_stream)
 		except:
 			LOG.exception(sys.exc_info()[0])
 		finally:
@@ -112,89 +112,11 @@ class Parser:
                                 kinesis_stream
                                 ):              
 		try:    
-                        LOG.info('kinesis_stream_reader started')
 
-                        #getting frame size
-##                        cmd = [
-##                                'ffprobe',
-##                                '-i', 'pipe:0',
-##                                '-v', 'error,
-##                                '-show_entries', 'stream=width,height',
-##                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
-##                        ]
-##                        LOG.info('starting ffprobe')
-##                        ffprobe_process = sp.Popen(cmd,
-##                                                       stdin=sp.PIPE,
-##                                                       stdout=sp.PIPE,
-##                                                       #stderr=sp.PIPE,
-##                                                       bufsize=10**8,
-##                                                       preexec_fn=os.setsid
-##                                                )
-##                        #self.ffmpeg_process.communicate()    
-##                        
-##                        READ_BUFFER_SIZE = 1000000
-##                        total_bytes = 0
-##                        data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
-##                        while data:
-##                                total_bytes += len(data)
-##                                print('Kinesis: ' + format(total_bytes))
-##                                self.ffprobe_process.stdin.write(data)
-##                                self.ffprobe_process.stdin.flush()
-##                                
-##                                data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
-##
-##                                if not self.run_kinesis_stream_reader:
-##                                        LOG.info('NOT self.run_kinesis_stream_reader')
-##                                        break                     
 
-                        
-                        
-                        
-                        cmd = [
-                                'ffmpeg',
-                                '-i', 'pipe:0',
-                                #'-i -',
-                                '-pix_fmt', 'bgr24',      # opencv requires bgr24 pixel format.
-                                '-vcodec', 'rawvideo',
-                                '-an', '-sn',              # we want to disable audio processing (there is no audio)
-                                '-f', 'image2pipe', '-',      # tell FFMPEG that it is being used with a pipe by another program
-                                #'pipe:1'
-                                #"-ss", "0"
-                                #"-vframes", "1" #only once
-                                #"-vf fps", "1" #every 1 sec
-                                #"-v", "warning",
-                                #"-strict", "experimental",
-                                #"-vf", "{0}, {1}".format(box, draw_text),
-                                #"-y",
-                                #"-f", "mp4",
-                                #"-movflags", "frag_keyframe",
-                                #"output.png"
-                                #'http://localhost:8090/cam2.ffm'
-                        ]                           
-                        cmd = [
-                                'ffmpeg',
-                                '-i', 'pipe:0',
-                                #'-c',  'copy',
-                                #'-map_metadata', '0',
-                                #'-map_metadata:s:v', '0:s:v',
-                                #'-map_metadata:s:a', '0:s:a',
-                                '-f', 'ffmetadata', 'metadata.txt'
-                        ]
-                        LOG.info('starting ffmpeg_process')
-                        self.ffmpeg_process = sp.Popen(cmd,
-                                                       stdin=sp.PIPE,
-                                                       stdout=sp.PIPE,
-                                                       #stderr=sp.PIPE,
-                                                       bufsize=10**8,
-                                                       preexec_fn=os.setsid
-                                                )
-                        #self.ffmpeg_process.communicate()
-                        
-                        LOG.info('starting frame_parser')
-                        from threading import Thread
-                        frame_parser_thread = Thread(target = self.frame_parser, args = (self.ffmpeg_process, ))                
-                        self.run_frame_parser = True
-                        #frame_parser_thread.start()                
+
+
+
                         
                         READ_BUFFER_SIZE = 1000000
                         total_bytes = 0
@@ -202,8 +124,8 @@ class Parser:
                         while data:
                                 total_bytes += len(data)
                                 print('Kinesis: ' + format(total_bytes))
-                                self.ffmpeg_process.stdin.write(data)
-                                self.ffmpeg_process.stdin.flush()
+#                                self.ffmpeg_process.stdin.write(data)
+#                                self.ffmpeg_process.stdin.flush()
                                 
                                 data = kinesis_stream.read(amt=READ_BUFFER_SIZE)
 
@@ -337,7 +259,7 @@ if __name__ == '__main__':#not to run when this module is being imported
                         print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
                 
                 p.Resume()
-                time.sleep(10)
+                time.sleep(100)
                 f = p.GetFrame()#last frame
                 if f is not None:
                         print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
