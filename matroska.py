@@ -107,6 +107,7 @@ class Ebml:
         else:
             raise EbmlException("don't know how to read %r-byte float" % length)
 
+            
     def parse(self, level=0, from_=0, to=None):
         try:
             LOG.info(">>>>>>>>>>>>>>LEVEL:%d"%level)
@@ -127,48 +128,48 @@ class Ebml:
                     return node
                 size = self.readElementSize()
                 if size == 0b01111111:
-                    print("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
+                    LOG.warning("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
                     size = to - self.stream.tell()
                 try:
-                    print('-------size:%d'%size)
-                    print('element id:%s'%hex(id))
+                    LOG.info('-------size:%d'%size)
+                    LOG.info('element id:%s'%hex(id))
                     key, type_ = self.tags[id]
-                    print('key:%s'%key)
-                    print('type_:%s'%type_)
+                    LOG.info('key:%s'%key)
+                    #LOG.info('type_:%s'%type_)
                 except:
-                    print("!unknown tag id")
+                    LOG.info("!unknown tag id")
                     self.stream.seek(size, 1)
                     continue
                 try:
                     if type_ is SINT:
-                        print('SINT')
+                        LOG.info('SINT')
                         value = self.readInteger(size, True)
                     elif type_ is UINT:
-                        print('UINT')
+                        LOG.info('UINT')
                         value = self.readInteger(size, False)
                     elif type_ is FLOAT:
-                        print('FLOAT')
+                        LOG.info('FLOAT')
                         value = self.readFloat(size)
                     elif type_ is STRING:
-                        print('STRING')
+                        LOG.info('STRING')
                         value = self.stream.read(size).decode('ascii')
                     elif type_ is UTF8:
-                        print('UTF8')
+                        LOG.info('UTF8')
                         value = self.stream.read(size).decode('utf-8')
                     elif type_ is DATE:
-                        print('DATE')
+                        LOG.info('DATE')
                         us = self.readInteger(size, True) / 1000.0  # ns to us
                         from datetime import datetime, timedelta
                         value = datetime(2001, 1, 1) + timedelta(microseconds=us)
                     elif type_ is MASTER:
-                        print('MASTER')
+                        LOG.info('MASTER')
                         t = self.stream.tell()
                         value = self.parse(level + 1, t, t + size)
                     elif type_ is BINARY:
-                        print('BINARY')
+                        LOG.info('BINARY')
                         value = BinaryData(self.stream.read(size))
                     else:
-                        print('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
+                        LOG.exception('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
                         assert False, type_
                 except (EbmlException, UnicodeDecodeError) as e:
                     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!error3")
@@ -177,10 +178,10 @@ class Ebml:
                     try:
                         parentval = node[key]
                     except:
-                        print('node zero')
+                        LOG.info('node zero')
                         parentval = node[key] = []
                     parentval.append(value)
-                print("position2:%d"%self.stream.tell())
+                LOG.info("position2:%d"%self.stream.tell())
         except:
             print("!!!!!!!!!!!!!!!!!!!!!!!error5")
             LOG.exception(sys.exc_info()[0])

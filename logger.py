@@ -33,7 +33,7 @@ import logging.handlers
 #fh.setLevel(logging.INFO)
 #fh.setFormatter(formatter)
 
-fh = logging.handlers.RotatingFileHandler(log_path, mode='w', maxBytes=None, backupCount=9)
+fh = logging.handlers.RotatingFileHandler(log_path, mode='a', maxBytes=None, backupCount=9)
 fh.doRollover()
 fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
