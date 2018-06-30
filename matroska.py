@@ -122,9 +122,8 @@ class Ebml:
                 except EbmlException as e:
                     # Invalid EBML header. We can't reliably get any more data from
                     # this level, so just return anything we have.
-                    LOG.exception(sys.exc_info()[0])
                     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!error1")
-                    warn(EbmlWarning(e))
+                    LOG.exception(sys.exc_info()[0])
                     return node
                 size = self.readElementSize()
                 if size == 0b01111111:
@@ -173,7 +172,7 @@ class Ebml:
                         assert False, type_
                 except (EbmlException, UnicodeDecodeError) as e:
                     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!error3")
-                    warn(EbmlWarning(e))
+                    LOG.exception(sys.exc_info()[0])
                 else:
                     try:
                         parentval = node[key]
