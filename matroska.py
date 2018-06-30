@@ -24,6 +24,17 @@ class Ebml:
     def __init__(self, source, tags):
         self.tags = tags
         self.open(source)
+        
+        self.unknownSizes = [
+            2**7 - 1,
+            2**14 - 1,
+            2**21 - 1,
+            2**28 - 1,
+            2**35 - 1,
+            2**42 - 1,
+            2**49 - 1,
+            2**56 - 1,
+        ]
 
     def __del__(self):
         self.stream.close()
@@ -41,7 +52,6 @@ class Ebml:
         b = self.stream.read(1)
         b1 = ord(b)
         if b1 & 0b10000000:  # 1 byte
-            #return b #!!!!!it was originally - it returns byte instead of uint
             return unpack(">H", b"\0" + b)[0]
         elif b1 & 0b01000000:  # 2 bytes
             return unpack(">H", b + self.stream.read(1))[0]
@@ -51,28 +61,47 @@ class Ebml:
             return unpack(">L", b + self.stream.read(3))[0]
         else:
             raise EbmlException("invalid element ID (leading byte 0x%02X)" % b1)
-
+    
+    unknownSizes = []
+    
     def readElementSize(self):
         b1 = ord(self.stream.read(1))
         if b1 & 0b10000000:  # 1 byte
-            return b1 & 0b01111111
+            s = unpack(">H", b"\0" + bchr(b1 & 0b01111111))[0]
+            if s == self.unknownSizes[0]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b01000000:  # 2 bytes
-            return unpack(">H", bchr(b1 & 0b00111111) + self.stream.read(1))[0]
+            s = unpack(">H", bchr(b1 & 0b00111111) + self.stream.read(1))[0]
+            if s == self.unknownSizes[1]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b00100000:  # 3 bytes
-            return unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.stream.read(2))[0]
+            s = unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.stream.read(2))[0]
+            if s == self.unknownSizes[2]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b00010000:  # 4 bytes
-            return unpack(">L", bchr(b1 & 0b00001111) + self.stream.read(3))[0]
+            s = unpack(">L", bchr(b1 & 0b00001111) + self.stream.read(3))[0]
+            if s == self.unknownSizes[3]:#'unknown-sized' element
+                s = -1
         elif b1 & 0x00001000:  # 5 bytes
-            return unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.stream.read(4))[0]
+            s = unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.stream.read(4))[0]
+            if s == self.unknownSizes[4]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b00000100:  # 6 bytes
-            return unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.stream.read(5))[0]
+            s = unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.stream.read(5))[0]
+            if s == self.unknownSizes[5]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b00000010:  # 7 bytes
-            return unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.stream.read(6))[0]
+            s = unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.stream.read(6))[0]
+            if s == self.unknownSizes[6]:#'unknown-sized' element
+                s = -1
         elif b1 & 0b00000001:  # 8 bytes
-            return unpack(">Q", b"\0" + self.stream.read(7))[0]
+            s = unpack(">Q", b"\0" + self.stream.read(7))[0]
+            if s == self.unknownSizes[7]:#'unknown-sized' element
+                s = -1
         else:
             assert b1 == 0
             raise EbmlException("undefined element size")
+        return s
 
     def readInteger(self, length, signed):
         if length == 1:
@@ -108,7 +137,7 @@ class Ebml:
             raise EbmlException("don't know how to read %r-byte float" % length)
 
             
-    def parse(self, level=0, from_=0, to=None):
+    def parse1(self, level=0, from_=0, to=None):
         try:
             LOG.info(">>>>>>>>>>>>>>LEVEL:%d"%level)
             if to is None:
@@ -127,8 +156,90 @@ class Ebml:
                     LOG.exception(sys.exc_info()[0])
                     return node
                 size = self.readElementSize()
-                if size == 0b01111111:#'unknown-sized' element which may be used in streaming
+                if size == 0b01111111:
                     LOG.warning("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
+                    size = to - self.stream.tell()
+                try:
+                    LOG.info('-------size:%d'%size)
+                    LOG.info('element id:%s'%hex(id))
+                    key, type_ = self.tags[id]
+                    LOG.info('key:%s'%key)
+                    #LOG.info('type_:%s'%type_)
+                except:
+                    LOG.info("!unknown tag id")
+                    self.stream.seek(size, 1)
+                    continue
+                try:
+                    if type_ is SINT:
+                        LOG.info('SINT')
+                        value = self.readInteger(size, True)
+                    elif type_ is UINT:
+                        LOG.info('UINT')
+                        value = self.readInteger(size, False)
+                    elif type_ is FLOAT:
+                        LOG.info('FLOAT')
+                        value = self.readFloat(size)
+                    elif type_ is STRING:
+                        LOG.info('STRING')
+                        value = self.stream.read(size).decode('ascii')
+                    elif type_ is UTF8:
+                        LOG.info('UTF8')
+                        value = self.stream.read(size).decode('utf-8')
+                    elif type_ is DATE:
+                        LOG.info('DATE')
+                        us = self.readInteger(size, True) / 1000.0  # ns to us
+                        from datetime import datetime, timedelta
+                        value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+                    elif type_ is MASTER:
+                        LOG.info('MASTER')
+                        t = self.stream.tell()
+                        value = self.parse(level + 1, t, t + size)
+                    elif type_ is BINARY:
+                        LOG.info('BINARY')
+                        value = BinaryData(self.stream.read(size))
+                    else:
+                        LOG.exception('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
+                        assert False, type_
+                except (EbmlException, UnicodeDecodeError) as e:
+                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!error3")
+                    LOG.exception(sys.exc_info()[0])
+                else:
+                    try:
+                        parentval = node[key]
+                    except:
+                        LOG.info('node zero')
+                        parentval = node[key] = []
+                    parentval.append(value)
+                LOG.info("position2:%d"%self.stream.tell())
+        except:
+            print("!!!!!!!!!!!!!!!!!!!!!!!error5")
+            LOG.exception(sys.exc_info()[0])
+        finally:
+            LOG.info("<<<<<<<<<<<<<<END OF LEVEL:%d"%level)
+            return node
+
+    def parse(self, level=0, from_=0, to=None):
+        try:
+            LOG.info(">>>>>>>>>>>>>>LEVEL:%d"%level)
+            if to is None:
+                to = self.size
+            LOG.info("to:%d"%to)
+            self.stream.seek(from_, 0)
+            node = {}
+            # Iterate over current node's children.
+            while self.stream.tell() < to:
+                LOG.info("position1:%d"%self.stream.tell())
+                try:
+                    id = self.readElementId()
+                except EbmlException as e:
+                    # Invalid EBML header. We can't reliably get any more data from
+                    # this level, so just return anything we have.
+                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!error1")
+                    LOG.exception(sys.exc_info()[0])
+                    return node
+                size = self.readElementSize()                 
+                if size < 0:#'unknown-sized' element
+                    LOG.warning("!!!!!!!!!!!!!!!!!!!!unknown-size element")
                     size = to - self.stream.tell()
                 try:
                     LOG.info('-------size:%d'%size)
@@ -192,6 +303,7 @@ class Ebml:
 # Interesting Matroska elements.
 # Elements not defined here are skipped while parsing.
 MatroskaElements = {
+    0x1a45dfa3: ('EBML', MASTER),
     # Segment
     0x18538067: ('Segment', MASTER),
     # Segment Information
