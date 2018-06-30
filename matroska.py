@@ -26,7 +26,7 @@ class Ebml:
         self.open(source)
 
     def __del__(self):
-        self.close()
+        self.stream.close()
 
     def open(self, source):
         try:
@@ -37,68 +37,60 @@ class Ebml:
         self.size = self.stream.tell()
         self.stream.seek(0, 0)
 
-    def read(self, length):
-        return self.stream.read(length)
-
-    def close(self):
-        self.stream.close()
-
-    ## Element reading
-
-    def readID(self):
-        b = self.read(1)
+    def readElementId(self):
+        b = self.stream.read(1)
         b1 = ord(b)
         if b1 & 0b10000000:  # 1 byte
             #return b #!!!!!it was originally - it returns byte instead of uint
             return unpack(">H", b"\0" + b)[0]
         elif b1 & 0b01000000:  # 2 bytes
-            return unpack(">H", b + self.read(1))[0]
+            return unpack(">H", b + self.stream.read(1))[0]
         elif b1 & 0b00100000:  # 3 bytes
-            return unpack(">L", b"\0" + b + self.read(2))[0]
+            return unpack(">L", b"\0" + b + self.stream.read(2))[0]
         elif b1 & 0b00010000:  # 4 bytes
-            return unpack(">L", b + self.read(3))[0]
+            return unpack(">L", b + self.stream.read(3))[0]
         else:
             raise EbmlException("invalid element ID (leading byte 0x%02X)" % b1)
 
-    def readSize(self):
-        b1 = ord(self.read(1))
+    def readElementSize(self):
+        b1 = ord(self.stream.read(1))
         if b1 & 0b10000000:  # 1 byte
             return b1 & 0b01111111
         elif b1 & 0b01000000:  # 2 bytes
-            return unpack(">H", bchr(b1 & 0b00111111) + self.read(1))[0]
+            return unpack(">H", bchr(b1 & 0b00111111) + self.stream.read(1))[0]
         elif b1 & 0b00100000:  # 3 bytes
-            return unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.read(2))[0]
+            return unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.stream.read(2))[0]
         elif b1 & 0b00010000:  # 4 bytes
-            return unpack(">L", bchr(b1 & 0b00001111) + self.read(3))[0]
+            return unpack(">L", bchr(b1 & 0b00001111) + self.stream.read(3))[0]
         elif b1 & 0x00001000:  # 5 bytes
-            return unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.read(4))[0]
+            return unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.stream.read(4))[0]
         elif b1 & 0b00000100:  # 6 bytes
-            return unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.read(5))[0]
+            return unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.stream.read(5))[0]
         elif b1 & 0b00000010:  # 7 bytes
-            return unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.read(6))[0]
+            return unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.stream.read(6))[0]
         elif b1 & 0b00000001:  # 8 bytes
-            return unpack(">Q", b"\0" + self.read(7))[0]
+            return unpack(">Q", b"\0" + self.stream.read(7))[0]
         else:
             assert b1 == 0
             raise EbmlException("undefined element size")
 
     def readInteger(self, length, signed):
         if length == 1:
-            value = ord(self.read(1))
+            value = ord(self.stream.read(1))
         elif length == 2:
-            value = unpack(">H", self.read(2))[0]
+            value = unpack(">H", self.stream.read(2))[0]
         elif length == 3:
-            value = unpack(">L", b"\0" + self.read(3))[0]
+            value = unpack(">L", b"\0" + self.stream.read(3))[0]
         elif length == 4:
-            value = unpack(">L", self.read(4))[0]
+            value = unpack(">L", self.stream.read(4))[0]
         elif length == 5:
-            value = unpack(">Q", b"\0\0\0" + self.read(5))[0]
+            value = unpack(">Q", b"\0\0\0" + self.stream.read(5))[0]
         elif length == 6:
-            value = unpack(">Q", b"\0\0" + self.read(6))[0]
+            value = unpack(">Q", b"\0\0" + self.stream.read(6))[0]
         elif length == 7:
-            value = unpack(">Q", b"\0" + (self.read(7)))[0]
+            value = unpack(">Q", b"\0" + (self.stream.read(7)))[0]
         elif length == 8:
-            value = unpack(">Q", self.read(8))[0]
+            value = unpack(">Q", self.stream.read(8))[0]
         else:
             raise EbmlException("don't know how to read %r-byte integer" % length)
         if signed:
@@ -109,13 +101,11 @@ class Ebml:
 
     def readFloat(self, length):
         if length == 4:
-            return unpack('>f', self.read(4))[0]
+            return unpack('>f', self.stream.read(4))[0]
         elif length == 8:
-            return unpack('>d', self.read(8))[0]
+            return unpack('>d', self.stream.read(8))[0]
         else:
             raise EbmlException("don't know how to read %r-byte float" % length)
-
-    ## Parsing
 
     def parse(self, level=0, from_=0, to=None):
         try:
@@ -128,7 +118,7 @@ class Ebml:
             while self.stream.tell() < to:
                 print("position1:%d"%self.stream.tell())
                 try:
-                    id = self.readID()
+                    id = self.readElementId()
                 except EbmlException as e:
                     # Invalid EBML header. We can't reliably get any more data from
                     # this level, so just return anything we have.
@@ -136,7 +126,7 @@ class Ebml:
                     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!error1")
                     warn(EbmlWarning(e))
                     return node
-                size = self.readSize()
+                size = self.readElementSize()
                 if size == 0b01111111:
                     print("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
                     size = to - self.stream.tell()
@@ -162,10 +152,10 @@ class Ebml:
                         value = self.readFloat(size)
                     elif type_ is STRING:
                         print('STRING')
-                        value = self.read(size).decode('ascii')
+                        value = self.stream.read(size).decode('ascii')
                     elif type_ is UTF8:
                         print('UTF8')
-                        value = self.read(size).decode('utf-8')
+                        value = self.stream.read(size).decode('utf-8')
                     elif type_ is DATE:
                         print('DATE')
                         us = self.readInteger(size, True) / 1000.0  # ns to us
@@ -177,7 +167,7 @@ class Ebml:
                         value = self.parse(level + 1, t, t + size)
                     elif type_ is BINARY:
                         print('BINARY')
-                        value = BinaryData(self.read(size))
+                        value = BinaryData(self.stream.read(size))
                     else:
                         print('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
                         assert False, type_
