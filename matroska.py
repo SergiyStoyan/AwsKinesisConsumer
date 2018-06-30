@@ -127,7 +127,7 @@ class Ebml:
                     LOG.exception(sys.exc_info()[0])
                     return node
                 size = self.readElementSize()
-                if size == 0b01111111:
+                if size == 0b01111111:#'unknown-sized' element which may be used in streaming
                     LOG.warning("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
                     size = to - self.stream.tell()
                 try:
