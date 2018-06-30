@@ -2,28 +2,202 @@ from __future__ import print_function
 from logger import LOG
 import sys
 from struct import pack, unpack
-from warnings import warn
 
 SINT, UINT, FLOAT, STRING, UTF8, DATE, MASTER, BINARY = range(8)
-
 
 class EbmlException(Exception):
     pass
 
-
 class EbmlWarning(Warning):
     pass
-
 
 class BinaryData(bytes):
     def __repr__(self):
         return "<BinaryData>"
 
-
 def bchr(n):
     """chr() that always returns bytes in Python 2 and 3"""
     return pack('B', n)
 
+class Ebml:
+
+    def __init__(self, source, tags):
+        self.tags = tags
+        self.open(source)
+
+    def __del__(self):
+        self.close()
+
+    def open(self, source):
+        try:
+            self.stream = open(source, 'rb')
+        except:
+            self.stream = source
+        self.stream.seek(0, 2)
+        self.size = self.stream.tell()
+        self.stream.seek(0, 0)
+
+    def read(self, length):
+        return self.stream.read(length)
+
+    def close(self):
+        self.stream.close()
+
+    ## Element reading
+
+    def readID(self):
+        b = self.read(1)
+        b1 = ord(b)
+        if b1 & 0b10000000:  # 1 byte
+            #return b #!!!!!it was originally - it returns byte instead of uint
+            return unpack(">H", b"\0" + b)[0]
+        elif b1 & 0b01000000:  # 2 bytes
+            return unpack(">H", b + self.read(1))[0]
+        elif b1 & 0b00100000:  # 3 bytes
+            return unpack(">L", b"\0" + b + self.read(2))[0]
+        elif b1 & 0b00010000:  # 4 bytes
+            return unpack(">L", b + self.read(3))[0]
+        else:
+            raise EbmlException("invalid element ID (leading byte 0x%02X)" % b1)
+
+    def readSize(self):
+        b1 = ord(self.read(1))
+        if b1 & 0b10000000:  # 1 byte
+            return b1 & 0b01111111
+        elif b1 & 0b01000000:  # 2 bytes
+            return unpack(">H", bchr(b1 & 0b00111111) + self.read(1))[0]
+        elif b1 & 0b00100000:  # 3 bytes
+            return unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.read(2))[0]
+        elif b1 & 0b00010000:  # 4 bytes
+            return unpack(">L", bchr(b1 & 0b00001111) + self.read(3))[0]
+        elif b1 & 0x00001000:  # 5 bytes
+            return unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.read(4))[0]
+        elif b1 & 0b00000100:  # 6 bytes
+            return unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.read(5))[0]
+        elif b1 & 0b00000010:  # 7 bytes
+            return unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.read(6))[0]
+        elif b1 & 0b00000001:  # 8 bytes
+            return unpack(">Q", b"\0" + self.read(7))[0]
+        else:
+            assert b1 == 0
+            raise EbmlException("undefined element size")
+
+    def readInteger(self, length, signed):
+        if length == 1:
+            value = ord(self.read(1))
+        elif length == 2:
+            value = unpack(">H", self.read(2))[0]
+        elif length == 3:
+            value = unpack(">L", b"\0" + self.read(3))[0]
+        elif length == 4:
+            value = unpack(">L", self.read(4))[0]
+        elif length == 5:
+            value = unpack(">Q", b"\0\0\0" + self.read(5))[0]
+        elif length == 6:
+            value = unpack(">Q", b"\0\0" + self.read(6))[0]
+        elif length == 7:
+            value = unpack(">Q", b"\0" + (self.read(7)))[0]
+        elif length == 8:
+            value = unpack(">Q", self.read(8))[0]
+        else:
+            raise EbmlException("don't know how to read %r-byte integer" % length)
+        if signed:
+            nbits = (8 - length) + 8 * (length - 1)
+            if value >= (1 << (nbits - 1)):
+                value -= 1 << nbits
+        return value
+
+    def readFloat(self, length):
+        if length == 4:
+            return unpack('>f', self.read(4))[0]
+        elif length == 8:
+            return unpack('>d', self.read(8))[0]
+        else:
+            raise EbmlException("don't know how to read %r-byte float" % length)
+
+    ## Parsing
+
+    def parse(self, level=0, from_=0, to=None):
+        try:
+            print(">>>>>>>>>>>>>>LEVEL:%d"%level)
+            if to is None:
+                to = self.size
+            self.stream.seek(from_, 0)
+            node = {}
+            # Iterate over current node's children.
+            while self.stream.tell() < to:
+                print("position1:%d"%self.stream.tell())
+                try:
+                    id = self.readID()
+                except EbmlException as e:
+                    # Invalid EBML header. We can't reliably get any more data from
+                    # this level, so just return anything we have.
+                    LOG.exception(sys.exc_info()[0])
+                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!error1")
+                    warn(EbmlWarning(e))
+                    return node
+                size = self.readSize()
+                if size == 0b01111111:
+                    print("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
+                    size = to - self.stream.tell()
+                try:
+                    print('-------size:%d'%size)
+                    print('element id:%s'%hex(id))
+                    key, type_ = self.tags[id]
+                    print('key:%s'%key)
+                    print('type_:%s'%type_)
+                except:
+                    print("!unknown tag id")
+                    self.stream.seek(size, 1)
+                    continue
+                try:
+                    if type_ is SINT:
+                        print('SINT')
+                        value = self.readInteger(size, True)
+                    elif type_ is UINT:
+                        print('UINT')
+                        value = self.readInteger(size, False)
+                    elif type_ is FLOAT:
+                        print('FLOAT')
+                        value = self.readFloat(size)
+                    elif type_ is STRING:
+                        print('STRING')
+                        value = self.read(size).decode('ascii')
+                    elif type_ is UTF8:
+                        print('UTF8')
+                        value = self.read(size).decode('utf-8')
+                    elif type_ is DATE:
+                        print('DATE')
+                        us = self.readInteger(size, True) / 1000.0  # ns to us
+                        from datetime import datetime, timedelta
+                        value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+                    elif type_ is MASTER:
+                        print('MASTER')
+                        t = self.stream.tell()
+                        value = self.parse(level + 1, t, t + size)
+                    elif type_ is BINARY:
+                        print('BINARY')
+                        value = BinaryData(self.read(size))
+                    else:
+                        print('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
+                        assert False, type_
+                except (EbmlException, UnicodeDecodeError) as e:
+                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!error3")
+                    warn(EbmlWarning(e))
+                else:
+                    try:
+                        parentval = node[key]
+                    except:
+                        print('node zero')
+                        parentval = node[key] = []
+                    parentval.append(value)
+                print("position2:%d"%self.stream.tell())
+        except:
+            print("!!!!!!!!!!!!!!!!!!!!!!!error5")
+            LOG.exception(sys.exc_info()[0])
+        finally:
+            print("<<<<<<<<<<<<<<END OF LEVEL:%d"%level)
+            return node
 
 # Interesting Matroska elements.
 # Elements not defined here are skipped while parsing.
@@ -109,199 +283,13 @@ MatroskaElements = {
     0xa2  : ('BlockVirtual', BINARY),
     #0x75a1  : ('BlockAdditions', ),
 }
+            
 
-class Ebml:
-
-    def __init__(self, location, tags):
-        self.tags = tags
-        self.open(location)
-
-    def __del__(self):
-        self.close()
-
-    def open(self, source):
-        try:
-            self.file = open(source, 'rb')
-        except:
-            self.file = source
-        self.file.seek(0, 2)
-        self.size = self.file.tell()
-        self.file.seek(0, 0)
-
-    def seek(self, offset, mode):
-        self.file.seek(offset, mode)
-
-    def tell(self):
-        return self.file.tell()
-
-    def read(self, length):
-        return self.file.read(length)
-
-    def close(self):
-        self.file.close()
-
-    ## Element reading
-
-    def readID(self):
-        b = self.read(1)
-        b1 = ord(b)
-        if b1 & 0b10000000:  # 1 byte
-            #return b #!!!!!it was originally - it returns byte instead of uint
-            return unpack(">H", b"\0" + b)[0]
-        elif b1 & 0b01000000:  # 2 bytes
-            return unpack(">H", b + self.read(1))[0]
-        elif b1 & 0b00100000:  # 3 bytes
-            return unpack(">L", b"\0" + b + self.read(2))[0]
-        elif b1 & 0b00010000:  # 4 bytes
-            return unpack(">L", b + self.read(3))[0]
-        else:
-            raise EbmlException("invalid element ID (leading byte 0x%02X)" % b1)
-
-    def readSize(self):
-        b1 = ord(self.read(1))
-        if b1 & 0b10000000:  # 1 byte
-            return b1 & 0b01111111
-        elif b1 & 0b01000000:  # 2 bytes
-            return unpack(">H", bchr(b1 & 0b00111111) + self.read(1))[0]
-        elif b1 & 0b00100000:  # 3 bytes
-            return unpack(">L", b"\0" + bchr(b1 & 0b00011111) + self.read(2))[0]
-        elif b1 & 0b00010000:  # 4 bytes
-            return unpack(">L", bchr(b1 & 0b00001111) + self.read(3))[0]
-        elif b1 & 0x00001000:  # 5 bytes
-            return unpack(">Q", b"\0\0\0" + bchr(b1 & 0b00000111) + self.read(4))[0]
-        elif b1 & 0b00000100:  # 6 bytes
-            return unpack(">Q", b"\0\0" + bchr(b1 & 0b0000011) + self.read(5))[0]
-        elif b1 & 0b00000010:  # 7 bytes
-            return unpack(">Q", b"\0" + bchr(b1 & 0b00000001) + self.read(6))[0]
-        elif b1 & 0b00000001:  # 8 bytes
-            return unpack(">Q", b"\0" + self.read(7))[0]
-        else:
-            assert b1 == 0
-            raise EbmlException("undefined element size")
-
-    def readInteger(self, length, signed):
-        if length == 1:
-            value = ord(self.read(1))
-        elif length == 2:
-            value = unpack(">H", self.read(2))[0]
-        elif length == 3:
-            value = unpack(">L", b"\0" + self.read(3))[0]
-        elif length == 4:
-            value = unpack(">L", self.read(4))[0]
-        elif length == 5:
-            value = unpack(">Q", b"\0\0\0" + self.read(5))[0]
-        elif length == 6:
-            value = unpack(">Q", b"\0\0" + self.read(6))[0]
-        elif length == 7:
-            value = unpack(">Q", b"\0" + (self.read(7)))[0]
-        elif length == 8:
-            value = unpack(">Q", self.read(8))[0]
-        else:
-            raise EbmlException("don't know how to read %r-byte integer" % length)
-        if signed:
-            nbits = (8 - length) + 8 * (length - 1)
-            if value >= (1 << (nbits - 1)):
-                value -= 1 << nbits
-        return value
-
-    def readFloat(self, length):
-        if length == 4:
-            return unpack('>f', self.read(4))[0]
-        elif length == 8:
-            return unpack('>d', self.read(8))[0]
-        else:
-            raise EbmlException("don't know how to read %r-byte float" % length)
-
-    ## Parsing
-
-    def parse(self, level=0, from_=0, to=None):
-        try:
-            print(">>>>>>>>>>>>>>LEVEL:%d"%level)
-            if to is None:
-                to = self.size
-            self.seek(from_, 0)
-            node = {}
-            # Iterate over current node's children.
-            while self.tell() < to:
-                print("position1:%d"%self.tell())
-                try:
-                    id = self.readID()
-                except EbmlException as e:
-                    # Invalid EBML header. We can't reliably get any more data from
-                    # this level, so just return anything we have.
-                    LOG.exception(sys.exc_info()[0])
-                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!error1")
-                    warn(EbmlWarning(e))
-                    return node
-                size = self.readSize()
-                if size == 0b01111111:
-                    print("!!!!!!!!!!!!!!!!!!!!don't know how to handle unknown-sized element")
-                    size = to - self.tell()
-                try:
-                    print('-------size:%d'%size)
-                    print('element id:%s'%hex(id))
-                    key, type_ = self.tags[id]
-                    print('key:%s'%key)
-                    print('type_:%s'%type_)
-                except:
-                    print("!unknown tag id")
-                    self.seek(size, 1)
-                    continue
-                try:
-                    if type_ is SINT:
-                        print('SINT')
-                        value = self.readInteger(size, True)
-                    elif type_ is UINT:
-                        print('UINT')
-                        value = self.readInteger(size, False)
-                    elif type_ is FLOAT:
-                        print('FLOAT')
-                        value = self.readFloat(size)
-                    elif type_ is STRING:
-                        print('STRING')
-                        value = self.read(size).decode('ascii')
-                    elif type_ is UTF8:
-                        print('UTF8')
-                        value = self.read(size).decode('utf-8')
-                    elif type_ is DATE:
-                        print('DATE')
-                        us = self.readInteger(size, True) / 1000.0  # ns to us
-                        from datetime import datetime, timedelta
-                        value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-                    elif type_ is MASTER:
-                        print('MASTER')
-                        tell = self.tell()
-                        value = self.parse(level + 1, tell, tell + size)
-                    elif type_ is BINARY:
-                        print('BINARY')
-                        value = BinaryData(self.read(size))
-                    else:
-                        print('!!!!!!!!!!!!!!!!!!!!!!!!!!unknown type')
-                        assert False, type_
-                except (EbmlException, UnicodeDecodeError) as e:
-                    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!error3")
-                    warn(EbmlWarning(e))
-                else:
-                    try:
-                        parentval = node[key]
-                    except:
-                        print('node zero')
-                        parentval = node[key] = []
-                    parentval.append(value)
-                print("position2:%d"%self.tell())
-        except:
-            print("!!!!!!!!!!!!!!!!!!!!!!!error5")
-            LOG.exception(sys.exc_info()[0])
-        finally:
-            print("<<<<<<<<<<<<<<END OF LEVEL:%d"%level)
-            return node
-
-
-def dump_tags(location):
+def dump_tags(source):
     print('###################')
     from pprint import pprint
 
-    e = Ebml(location, MatroskaElements)
+    e = Ebml(source, MatroskaElements)
     try:
         mka = e.parse()    
     except:
