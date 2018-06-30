@@ -109,14 +109,14 @@ class Ebml:
 
     def parse(self, level=0, from_=0, to=None):
         try:
-            print(">>>>>>>>>>>>>>LEVEL:%d"%level)
+            LOG.info(">>>>>>>>>>>>>>LEVEL:%d"%level)
             if to is None:
                 to = self.size
             self.stream.seek(from_, 0)
             node = {}
             # Iterate over current node's children.
             while self.stream.tell() < to:
-                print("position1:%d"%self.stream.tell())
+                LOG.info("position1:%d"%self.stream.tell())
                 try:
                     id = self.readElementId()
                 except EbmlException as e:
@@ -185,7 +185,7 @@ class Ebml:
             print("!!!!!!!!!!!!!!!!!!!!!!!error5")
             LOG.exception(sys.exc_info()[0])
         finally:
-            print("<<<<<<<<<<<<<<END OF LEVEL:%d"%level)
+            LOG.info("<<<<<<<<<<<<<<END OF LEVEL:%d"%level)
             return node
 
 # Interesting Matroska elements.
@@ -276,7 +276,7 @@ MatroskaElements = {
 
 def dump_tags(source):
     print('###################')
-    from pprint import pprint
+    from pprint import pprint, pformat
 
     e = Ebml(source, MatroskaElements)
     try:
@@ -288,5 +288,6 @@ def dump_tags(source):
     #segment = mka['Segment'][0]
     #pprint(segment['Tags'][0]['Tag'])
     pprint(mka)
+    LOG.info(pformat(mka))
 
     
