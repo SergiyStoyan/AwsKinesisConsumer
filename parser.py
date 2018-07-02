@@ -16,6 +16,7 @@ import subprocess as sp
 import signal
 import threading
 from ebml import EbmlReader
+import ebml
 import copy
 
 class Parser:
@@ -26,12 +27,12 @@ class Parser:
     def __exit__(self, exc_type, exc_value, traceback):
         self.dispose()
 
-    def __del__(self, exc_type, exc_value, traceback):
+    def __del__(self):
         self.dispose()
 
     def dispose(self):
         if self.disposed:
-                return
+            return
         self.disposed = True
         LOG.info('Shutting down Parser...')
         
@@ -124,12 +125,27 @@ class Parser:
             #from pprint import pprint
             interstingElementNames = [
                 'Segment', 
-                # 'Cluster',
-                # 'Tags',
-                # 'Tag',
-                # 'SimpleTag',
-                'TagName',
-                'TagString',
+                'Cluster',
+                #'TagName',
+                #'TagString',
+                'CodecID',
+                'CodecName',
+                'PixelWidth',
+                'PixelHeight',
+                'Video',
+                'TrackEntry',
+                'Tracks',
+                'Cluster',
+    'Timecode',
+    'Position',
+    'PrevSize',
+    'BlockGroup', 
+    'Block', 
+    'BlockVirtual',
+    'SimpleBlock', 
+    'BlockDuration',
+    'Slices', 
+    'BlockAdditions',
             ]
             er = EbmlReader(kinesis_stream, interstingElementNames)
                         
@@ -149,7 +165,10 @@ class Parser:
                 #LOG.info('@@@@@@@@@@@@@@@@@@@ %d'%i)
                 try:
                     size, id, name, type_, value = er.ReadNextElement()
-                    LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, id, type_, value))
+                    if type_ != ebml.BINARY:
+                        LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, id, type_, value))
+                    else:
+                        LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, id, type_, '<BINARY>'))
                     if name == 'TagName':
                         lastTagName = value
                     elif name == 'TagString' and name in tagNames2string:
@@ -162,7 +181,7 @@ class Parser:
                     print('!!!!!!!!!!!!!!!!')
                 #else:
                 #    pprint(names2value)
-                print('###################')
+                #print('###################')
         except:
             LOG.exception(sys.exc_info()[0])
         finally:

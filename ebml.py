@@ -36,10 +36,8 @@ EbmlElementIds2NameType = {
     0x22b59c: ('Language', STRING),
     0x86: ('CodecID', STRING),
     0x63a2: ('CodecPrivate', BINARY),
-    0x258688: ('CodecName', STRING),
-    
+    0x258688: ('CodecName', STRING),    
     # Video
-    0xE0: ('Video', MASTER),
     0xe0: ('Video', MASTER),
     0x9a: ('FlagInterlaced', UINT),
     0x53b8: ('StereoMode', UINT),
@@ -99,15 +97,18 @@ EbmlElementIds2NameType = {
     0x4484: ('TagDefault', UINT),
     0x4487: ('TagString', UTF8),
     0x4485: ('TagBinary', BINARY),
-    # Cluster Information
+    # Cluster
     0x1f43b675: ('Cluster', MASTER),
     0xe7 : ('Timecode', UINT),
     0xa7  : ('Position', UINT),
     0xab  : ('PrevSize', UINT),
-    #0xa0  : ('BlockGroup',     ),
+    0xa0  : ('BlockGroup',  MASTER),
     0xa1 : ('Block', BINARY),
     0xa2  : ('BlockVirtual', BINARY),
-    #0x75a1  : ('BlockAdditions', ),
+    0xa3: ('SimpleBlock', BINARY),
+    0x9b: ('BlockDuration', UINT),
+    0x8e: ('Slices', MASTER),
+    0x75a1  : ('BlockAdditions', MASTER),
 }
 
 class EbmlException(Exception):
@@ -265,7 +266,7 @@ class EbmlReader(object):
         except:
             name = None
             type_ = None
-        LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.position, size, id, name, type_))
+        #LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.position, size, id, name, type_))
         self.lastReadHeadElementName = name
         self.lastReadHeadElementSize = size
         return (size, id, name, type_)
@@ -276,7 +277,7 @@ class EbmlReader(object):
         while True:
             if type_ == MASTER:
                 if name in self.interstingElementNames:
-                    return (size, id, name, type_, None)
+                    return (size, id, name, type_, '<MASTER>')
                 size, id, name, type_ = self.readElementHead() 
                 continue
             if size < 0:
