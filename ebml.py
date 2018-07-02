@@ -1,12 +1,109 @@
-from __future__ import print_function
+#Non-seekable EBML (matroska) stream parser
+#By Sergey Stoyan <sergey.stoyan@gmail.com>
+#This code is based on this Matroska parser https://github.com/exaile/exaile/blob/master/xl/metadata/_matroska.py
+#It was heavily readone to parse non-seekable streams. Also, several mistakes were fixed.
+
+#from __future__ import print_function
 from logger import LOG
 import sys
 from struct import pack, unpack
 
 SINT, UINT, FLOAT, STRING, UTF8, DATE, MASTER, BINARY = range(8)
 
+# Matroska (EBML) elements that are to be parsed. Elements not defined here will be skipped.
+EbmlElementIds2NameType = {
+    0x1a45dfa3: ('EBML', MASTER),
+    # Segment
+    0x18538067: ('Segment', MASTER),
+    # Segment Information
+    0x1549A966: ('Info', MASTER),
+    0x7384: ('SegmentFilename', UTF8),
+    0x2AD7B1: ('TimecodeScale', UINT),
+    0x4489: ('Duration', FLOAT),
+    0x4461: ('DateUTC', DATE),
+    0x7BA9: ('Title', UTF8),
+    0x4D80: ('MuxingApp', UTF8),
+    0x5741: ('WritingApp', UTF8),
+    # Track
+    0x1654AE6B: ('Tracks', MASTER),
+    0xAE: ('TrackEntry', MASTER),
+    0xD7: ('TrackNumber', UINT),
+    0x83: ('TrackType', UINT),
+    0xB9: ('FlagEnabled', UINT),
+    0x88: ('FlagDefault', UINT),
+    0x23E383: ('DefaultDuration', UINT),
+    0x536E: ('Name', UTF8),
+    0x22B59C: ('Language', STRING),
+    0x86: ('CodecID', STRING),
+    0x258688: ('CodecName', UTF8),
+    # Video
+    0xE0: ('Video', MASTER),
+    # Audio
+    0xE1: ('Audio', MASTER),
+    0xB5: ('SamplingFrequency', FLOAT),
+    0x78B5: ('OutputSamplingFrequency', FLOAT),
+    0x9F: ('Channels', UINT),
+    0x6264: ('BitDepth', UINT),
+    # Attachment
+    0x1941A469: ('Attachments', MASTER),
+    0x61A7: ('AttachedFile', MASTER),
+    0x466E: ('FileName', UTF8),
+    0x465C: ('FileData', BINARY),
+    # Chapters
+    0x1043A770: ('Chapters', MASTER),
+    0x45B9: ('EditionEntry', MASTER),
+    0x45BC: ('EditionUID', UINT),
+    0x45BD: ('EditionFlagHidden', UINT),
+    0x45DB: ('EditionFlagDefault', UINT),
+    0x45DD: ('EditionFlagOrdered', UINT),
+    0xB6: ('ChapterAtom', MASTER),
+    0x73C4: ('ChapterUID', UINT),
+    0x91: ('ChapterTimeStart', UINT),
+    0x92: ('ChapterTimeEnd', UINT),
+    0x98: ('ChapterFlagHidden', UINT),
+    0x4598: ('ChapterFlagEnabled', UINT),
+    0x63C3: ('ChapterPhysicalEquiv', UINT),
+    0x8F: ('ChapterTrack', MASTER),
+    0x89: ('ChapterTrackNumber', UINT),
+    0x80: ('ChapterDisplay', MASTER),
+    0x85: ('ChapString', UTF8),
+    0x437C: ('ChapLanguage', STRING),
+    0x437E: ('ChapCountry', STRING),
+    # Tagging
+    0x1254C367: ('Tags', MASTER),
+    0x7373: ('Tag', MASTER),
+    0x63C0: ('Targets', MASTER),
+    0x68CA: ('TargetTypevalue', UINT),
+    0x63CA: ('TargetType', STRING),
+    0x63C5: ('TagTrackUID', UINT),
+    0x63C9: ('TagEditionUID', UINT),
+    0x63C4: ('TagChapterUID', UINT),
+    0x67C8: ('SimpleTag', MASTER),
+    0x45A3: ('TagName', UTF8),
+    0x447A: ('TagLanguage', STRING),
+    0x4484: ('TagDefault', UINT),
+    0x4487: ('TagString', UTF8),
+    0x4485: ('TagBinary', BINARY),
+    # Cluster Information
+    0x1f43b675: ('Cluster', MASTER),
+    0xe7 : ('Timecode', UINT),
+    0xa7  : ('Position', UINT),
+    0xab  : ('PrevSize', UINT),
+    #0xa0  : ('BlockGroup',     ),
+    0xa1 : ('Block', BINARY),
+    0xa2  : ('BlockVirtual', BINARY),
+    #0x75a1  : ('BlockAdditions', ),
+}
+
 class EbmlException(Exception):
     pass
+    
+class EbmlUnknownSizeException(Exception):
+    pass
+    
+class EbmlInconsistentEmbeddingException(Exception):
+    def __init__(self, elementName):
+        self.ElementName = elementName
 
 class EbmlWarning(Warning):
     pass
@@ -19,15 +116,14 @@ def bchr(n):
     """chr() that always returns bytes in Python 2 and 3"""
     return pack('B', n)
 
-class Ebml:
+class EbmlReader(object):
 
-    def __init__(self, source, tags):
-        self.tags = tags
+    def __init__(self, source, elementIds2nameType=EbmlElementIds2NameType):
+        self.elementIds2nameType = elementIds2nameType
         try:
             self.stream = open(source, 'rb')
         except:
             self.stream = source
-        self.position = 0
 
     def __del__(self):
         try:
@@ -37,7 +133,7 @@ class Ebml:
 
     def read(self, length):
         self.position += length
-        return self.read(length)
+        return self.stream.read(length)            
         
     def readElementId(self):
         b = self.read(1)
@@ -136,162 +232,104 @@ class Ebml:
         else:
             raise EbmlException("don't know how to read %r-byte float" % length)
   
-    def parseLevel0Element(self):
+    def ReadLevel0Element(self):
+        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        because it can not recognize when to return to upper level element'''
         self.position = 0
-        return parseElement()
+        size, id, name, type_ = self.readElementHead()
+        rootNode = {'parent': None, 'size': size, 'id': id, 'name': name, 'type': type_}
+        try:
+            self._readMasterElement(rootNode)
+        except (EbmlInconsistentEmbeddingException) as e:
+            pass
+        return rootNode
         
-    def readElementHead(self)    
+    def readElementHead(self):  
         try:
             id = self.readElementId()
-        except EbmlException as e:
-            # Invalid EBML header. We can't reliably get any more data from
-            # this level, so just return anything we have.
-            raise EbmlException("Invalid EBML header")
-        size = self.readElementSize()       
+        except:  # Invalid EBML header. 
+            LOG.exception(sys.exc_info()[0])
+            id = None
         try:
-            name, type_ = self.tags[id]
-        except:
-            if size < 0:#'unknown-size' element
-                raise EbmlException("Unknown element (id=%x) with unknown size. Fursther parsing is impossible."%id)
+            size = self.readElementSize()
+        except: 
+            LOG.exception(sys.exc_info()[0])
+            size = -1
+        if id is not None:
+            try:
+                name, type_ = self.elementIds2nameType[id]
+            except:
+                name = None
+                type_ = None
+        LOG.info('position: %d, size:%d, id:%x, name:%s, type_:%s' % (self.position, size, id, name, type_)) 
         return (size, id, name, type_)
         
-    def parseElement(self, parentSize):
-        '''!!!ATTENTION: this methos is not appropriate for parsing unknown-size elements
-        because it does not return to upper level'''
-        node = {}
-        # Iterate over current node's children.
-        while self.position < parentSize:
-            size, id, name, type_ = readElementHead()
-            if(size < 0):#'unknown-size' element
-                read(size)
+    def _readMasterElement(self, parentNode):
+        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        because it can not recognize when to return to upper level element'''
+        parentNode['children'] = []
+        while parentNode['Size'] < 0 or self.position < parentNode['Size']:
+            size, id, name, type_ = self.readElementHead()
+            ###here check if this name cannot be contained by the parents
+            #raise EbmlInconsistentEmbeddingException(name)            
+            if id is None:#'malformed header    
+                if parentNode['Size'] < 0:#'unknown-size' element
+                    raise EbmlUnknownSizeException("Malformed element header while parent is unknown-size element.")
+                self.read(parentNode['Size'] - self.position)             
+                return
+            if type_ is None:#Unknown element
+                if size < 0:#'unknown-size' element
+                    if parentNode['Size'] < 0:#'unknown-size' element
+                        raise EbmlUnknownSizeException("Unknown element (id=%x) with unknown-size while parent is unknown-size element."%id)
+                    self.read(parentNode['Size'] - self.position)             
+                    return
+                self.read(size)
                 continue
-            try:
-                if type_ is SINT:
-                    #LOG.info('SINT')
-                    value = self.readInteger(size, True)
-                elif type_ is UINT:
-                    #LOG.info('UINT')
-                    value = self.readInteger(size, False)
-                elif type_ is FLOAT:
-                    #LOG.info('FLOAT')
-                    value = self.readFloat(size)
-                elif type_ is STRING:
-                    #LOG.info('STRING')
-                    value = self.stream.read(size).decode('ascii')
-                elif type_ is UTF8:
-                    #LOG.info('UTF8')
-                    value = self.stream.read(size).decode('utf-8')
-                elif type_ is DATE:
-                    #LOG.info('DATE')
-                    us = self.readInteger(size, True) / 1000.0  # ns to us
-                    from datetime import datetime, timedelta
-                    value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-                elif type_ is MASTER:
-                    #LOG.info('MASTER')
-                    value = self.parseElement(level + 1, size)
-                elif type_ is BINARY:
-                    #LOG.info('BINARY')
-                    value = BinaryData(self.stream.read(size))
-                else:
-                    assert False, type_
-            except (EbmlException, UnicodeDecodeError) as e:
-                #LOG.exception(sys.exc_info()[0])
-                print(sys.exc_info()[0])
-            else:
+            if type_ is SINT:
+                #LOG.info('SINT')
+                value = self.readInteger(size, True)
+            elif type_ is UINT:
+                #LOG.info('UINT')
+                value = self.readInteger(size, False)
+            elif type_ is FLOAT:
+                #LOG.info('FLOAT')
+                value = self.readFloat(size)
+            elif type_ is STRING:
+                #LOG.info('STRING')
+                value = self.read(size).decode('ascii')
+            elif type_ is UTF8:
+                #LOG.info('UTF8')
+                value = self.read(size).decode('utf-8')
+            elif type_ is DATE:
+                #LOG.info('DATE')
+                us = self.readInteger(size, True) / 1000.0  # ns to us
+                from datetime import datetime, timedelta
+                value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+            elif type_ is MASTER:
+                #LOG.info('MASTER')
+                node = {'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_}
+                parentNode['children'].append(node)
                 try:
-                    node[key]
-                except:
-                    node[key] = []
-                node[key].append(value)                
-        return node
+                    self._readMasterElement(node[name], node)
+                except (EbmlUnknownSizeException) as e:
+                    if parentNode['Size'] < 0:
+                        raise e
+                    self.read(parentNode['Size'] - self.position)                                    
+                    return 
+                except (EbmlInconsistentEmbeddingException) as e:
+                    ###if this level is not appropriate to insert:
+                    ###    raise e
+                    ###parentNode['children'].append(node)  
+                    pass
+                continue    
+            elif type_ is BINARY:
+                #LOG.info('BINARY')
+                value = BinaryData(self.read(size))
+            else:
+                assert False, type_
+            parentNode['children'].append({'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_, 'value': value})
       
        
-
-# Matroska elements to be parsed. Elements not defined here will be skipped.
-MatroskaElementIds2NameType = {
-    0x1a45dfa3: ('EBML', MASTER),
-    # Segment
-    0x18538067: ('Segment', MASTER),
-    # Segment Information
-    0x1549A966: ('Info', MASTER),
-    0x7384: ('SegmentFilename', UTF8),
-    0x2AD7B1: ('TimecodeScale', UINT),
-    0x4489: ('Duration', FLOAT),
-    0x4461: ('DateUTC', DATE),
-    0x7BA9: ('Title', UTF8),
-    0x4D80: ('MuxingApp', UTF8),
-    0x5741: ('WritingApp', UTF8),
-    # Track
-    0x1654AE6B: ('Tracks', MASTER),
-    0xAE: ('TrackEntry', MASTER),
-    0xD7: ('TrackNumber', UINT),
-    0x83: ('TrackType', UINT),
-    0xB9: ('FlagEnabled', UINT),
-    0x88: ('FlagDefault', UINT),
-    0x23E383: ('DefaultDuration', UINT),
-    0x536E: ('Name', UTF8),
-    0x22B59C: ('Language', STRING),
-    0x86: ('CodecID', STRING),
-    0x258688: ('CodecName', UTF8),
-    # Video
-    0xE0: ('Video', MASTER),
-    # Audio
-    0xE1: ('Audio', MASTER),
-    0xB5: ('SamplingFrequency', FLOAT),
-    0x78B5: ('OutputSamplingFrequency', FLOAT),
-    0x9F: ('Channels', UINT),
-    0x6264: ('BitDepth', UINT),
-    # Attachment
-    0x1941A469: ('Attachments', MASTER),
-    0x61A7: ('AttachedFile', MASTER),
-    0x466E: ('FileName', UTF8),
-    0x465C: ('FileData', BINARY),
-    # Chapters
-    0x1043A770: ('Chapters', MASTER),
-    0x45B9: ('EditionEntry', MASTER),
-    0x45BC: ('EditionUID', UINT),
-    0x45BD: ('EditionFlagHidden', UINT),
-    0x45DB: ('EditionFlagDefault', UINT),
-    0x45DD: ('EditionFlagOrdered', UINT),
-    0xB6: ('ChapterAtom', MASTER),
-    0x73C4: ('ChapterUID', UINT),
-    0x91: ('ChapterTimeStart', UINT),
-    0x92: ('ChapterTimeEnd', UINT),
-    0x98: ('ChapterFlagHidden', UINT),
-    0x4598: ('ChapterFlagEnabled', UINT),
-    0x63C3: ('ChapterPhysicalEquiv', UINT),
-    0x8F: ('ChapterTrack', MASTER),
-    0x89: ('ChapterTrackNumber', UINT),
-    0x80: ('ChapterDisplay', MASTER),
-    0x85: ('ChapString', UTF8),
-    0x437C: ('ChapLanguage', STRING),
-    0x437E: ('ChapCountry', STRING),
-    # Tagging
-    0x1254C367: ('Tags', MASTER),
-    0x7373: ('Tag', MASTER),
-    0x63C0: ('Targets', MASTER),
-    0x68CA: ('TargetTypevalue', UINT),
-    0x63CA: ('TargetType', STRING),
-    0x63C5: ('TagTrackUID', UINT),
-    0x63C9: ('TagEditionUID', UINT),
-    0x63C4: ('TagChapterUID', UINT),
-    0x67C8: ('SimpleTag', MASTER),
-    0x45A3: ('TagName', UTF8),
-    0x447A: ('TagLanguage', STRING),
-    0x4484: ('TagDefault', UINT),
-    0x4487: ('TagString', UTF8),
-    0x4485: ('TagBinary', BINARY),
-    # Cluster Information
-    0x1f43b675: ('Cluster', MASTER),
-    0xe7 : ('Timecode', UINT),
-    0xa7  : ('Position', UINT),
-    0xab  : ('PrevSize', UINT),
-    #0xa0  : ('BlockGroup',     ),
-    0xa1 : ('Block', BINARY),
-    0xa2  : ('BlockVirtual', BINARY),
-    #0x75a1  : ('BlockAdditions', ),
-}
-            
 
 
     
