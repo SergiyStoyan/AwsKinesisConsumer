@@ -1,16 +1,13 @@
 #Non-seekable EBML (matroska) stream parser
 #By Sergey Stoyan <sergey.stoyan@gmail.com>
-#This code is based on this Matroska parser https://github.com/exaile/exaile/blob/master/xl/metadata/_matroska.py
-#It was heavily readone to parse non-seekable streams. Also, several mistakes were fixed.
 
-#from __future__ import print_function
 from logger import LOG
 import sys
 from struct import pack, unpack
 
 SINT, UINT, FLOAT, STRING, UTF8, DATE, MASTER, BINARY = range(8)
 
-# Matroska (EBML) elements that are to be parsed. Elements not defined here will be skipped.
+#!!!not complete list!!!
 EbmlElementIds2NameType = {
     0x1a45dfa3: ('EBML', MASTER),
     # Segment
@@ -24,20 +21,38 @@ EbmlElementIds2NameType = {
     0x7BA9: ('Title', UTF8),
     0x4D80: ('MuxingApp', UTF8),
     0x5741: ('WritingApp', UTF8),
-    # Track
-    0x1654AE6B: ('Tracks', MASTER),
-    0xAE: ('TrackEntry', MASTER),
-    0xD7: ('TrackNumber', UINT),
+    # Track    
+    0x1654ae6b: ('Tracks', MASTER),
+    0xae: ('TrackEntry', MASTER),
+    0xd7: ('TrackNumber', UINT),
+    0x73c5: ('TrackUID', UINT),
     0x83: ('TrackType', UINT),
-    0xB9: ('FlagEnabled', UINT),
+    0xb9: ('FlagEnabled', UINT),
     0x88: ('FlagDefault', UINT),
-    0x23E383: ('DefaultDuration', UINT),
-    0x536E: ('Name', UTF8),
-    0x22B59C: ('Language', STRING),
+    0x55aa: ('FlagForced', UINT),
+    0x9c: ('FlagLacing', UINT),
+    0x23e383: ('DefaultDuration', UINT),
+    0x536e: ('Name', STRING),
+    0x22b59c: ('Language', STRING),
     0x86: ('CodecID', STRING),
-    0x258688: ('CodecName', UTF8),
+    0x63a2: ('CodecPrivate', BINARY),
+    0x258688: ('CodecName', STRING),
+    
     # Video
     0xE0: ('Video', MASTER),
+    0xe0: ('Video', MASTER),
+    0x9a: ('FlagInterlaced', UINT),
+    0x53b8: ('StereoMode', UINT),
+    0xb0: ('PixelWidth', UINT),
+    0xba: ('PixelHeight', UINT),
+    0x54aa: ('PixelCropBottom', UINT),
+    0x54bb: ('PixelCropTop', UINT),
+    0x54cc: ('PixelCropLeft', UINT),
+    0x54dd: ('PixelCropRight', UINT),
+    0x54B0: ('DisplayWidth', UINT),
+    0x54BA: ('DisplayHeight', UINT),
+    0x54b2: ('DisplayUnit', UINT),
+    0x54b3: ('AspectRatioType', UINT),
     # Audio
     0xE1: ('Audio', MASTER),
     0xB5: ('SamplingFrequency', FLOAT),
@@ -118,12 +133,14 @@ def bchr(n):
 
 class EbmlReader(object):
 
-    def __init__(self, source, elementIds2nameType=EbmlElementIds2NameType):
-        self.elementIds2nameType = elementIds2nameType
+    def __init__(self, source, interstingElementNames=None):
+        self.interstingElementNames = interstingElementNames
         try:
             self.stream = open(source, 'rb')
         except:
             self.stream = source
+        self.lastReadHeadElementName = None
+        self.lastReadHeadElementSize = -1
 
     def __del__(self):
         try:
@@ -231,18 +248,6 @@ class EbmlReader(object):
             return unpack('>d', self.read(8))[0]
         else:
             raise EbmlException("don't know how to read %r-byte float" % length)
-  
-    def ReadLevel0Element(self):
-        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
-        because it can not recognize when to return to upper level element'''
-        self.position = 0
-        size, id, name, type_ = self.readElementHead()
-        rootNode = {'parent': None, 'size': size, 'id': id, 'name': name, 'type': type_}
-        try:
-            self._readMasterElement(rootNode)
-        except (EbmlInconsistentEmbeddingException) as e:
-            pass
-        return rootNode
         
     def readElementHead(self):  
         try:
@@ -255,79 +260,127 @@ class EbmlReader(object):
         except: 
             LOG.exception(sys.exc_info()[0])
             size = -1
-        if id is not None:
-            try:
-                name, type_ = self.elementIds2nameType[id]
-            except:
-                name = None
-                type_ = None
-        LOG.info('position: %d, size:%d, id:%x, name:%s, type_:%s' % (self.position, size, id, name, type_)) 
+        try:
+            name, type_ = EbmlElementIds2NameType[id]
+        except:
+            name = None
+            type_ = None
+        LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.position, size, id, name, type_))
+        self.lastReadHeadElementName = name
+        self.lastReadHeadElementSize = size
         return (size, id, name, type_)
-        
-    def _readMasterElement(self, parentNode):
-        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
-        because it can not recognize when to return to upper level element'''
-        parentNode['children'] = []
-        while parentNode['Size'] < 0 or self.position < parentNode['Size']:
-            size, id, name, type_ = self.readElementHead()
-            ###here check if this name cannot be contained by the parents
-            #raise EbmlInconsistentEmbeddingException(name)            
-            if id is None:#'malformed header    
-                if parentNode['Size'] < 0:#'unknown-size' element
-                    raise EbmlUnknownSizeException("Malformed element header while parent is unknown-size element.")
-                self.read(parentNode['Size'] - self.position)             
-                return
-            if type_ is None:#Unknown element
-                if size < 0:#'unknown-size' element
-                    if parentNode['Size'] < 0:#'unknown-size' element
-                        raise EbmlUnknownSizeException("Unknown element (id=%x) with unknown-size while parent is unknown-size element."%id)
-                    self.read(parentNode['Size'] - self.position)             
-                    return
-                self.read(size)
+          
+    def ReadNextElement(self):
+        self.position = 0
+        size, id, name, type_ = self.readElementHead()   
+        while True:
+            if type_ == MASTER:
+                if name in self.interstingElementNames:
+                    return (size, id, name, type_, None)
+                size, id, name, type_ = self.readElementHead() 
                 continue
-            if type_ is SINT:
-                #LOG.info('SINT')
-                value = self.readInteger(size, True)
-            elif type_ is UINT:
-                #LOG.info('UINT')
-                value = self.readInteger(size, False)
-            elif type_ is FLOAT:
-                #LOG.info('FLOAT')
-                value = self.readFloat(size)
-            elif type_ is STRING:
-                #LOG.info('STRING')
-                value = self.read(size).decode('ascii')
-            elif type_ is UTF8:
-                #LOG.info('UTF8')
-                value = self.read(size).decode('utf-8')
-            elif type_ is DATE:
-                #LOG.info('DATE')
-                us = self.readInteger(size, True) / 1000.0  # ns to us
-                from datetime import datetime, timedelta
-                value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-            elif type_ is MASTER:
-                #LOG.info('MASTER')
-                node = {'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_}
-                parentNode['children'].append(node)
-                try:
-                    self._readMasterElement(node[name], node)
-                except (EbmlUnknownSizeException) as e:
-                    if parentNode['Size'] < 0:
-                        raise e
-                    self.read(parentNode['Size'] - self.position)                                    
-                    return 
-                except (EbmlInconsistentEmbeddingException) as e:
-                    ###if this level is not appropriate to insert:
-                    ###    raise e
-                    ###parentNode['children'].append(node)  
-                    pass
-                continue    
-            elif type_ is BINARY:
-                #LOG.info('BINARY')
-                value = BinaryData(self.read(size))
-            else:
-                assert False, type_
-            parentNode['children'].append({'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_, 'value': value})
+            if size < 0:
+                raise Exception('Not MASTER element with unknown size.')
+            if name is None or name not in self.interstingElementNames:
+                self.read(size)
+                size, id, name, type_ = self.readElementHead()   
+                continue
+            break         
+       
+        if type_ is SINT:
+            value = self.readInteger(size, True)
+        elif type_ is UINT:
+            value = self.readInteger(size, False)
+        elif type_ is FLOAT:
+            value = self.readFloat(size)
+        elif type_ is STRING:
+            value = self.read(size).decode('ascii')
+        elif type_ is UTF8:
+            value = self.read(size).decode('utf-8')
+        elif type_ is DATE:
+            us = self.readInteger(size, True) / 1000.0  # ns to us
+            from datetime import datetime, timedelta
+            value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+        elif type_ is MASTER:
+            #value = self._readMasterChildElements(size) 
+            raise Exception("Should not read MASTER here.")
+        elif type_ is BINARY:
+            value = BinaryData(self.read(size))
+        else:
+            assert False, type_
+        return (size, id, name, type_, value)
+            
+        
+
+    
+    # def ReadLevel0Element(self):
+        # '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        # because it can not recognize when to return to upper level element'''
+        # self.position = 0
+        # size, id, name, type_ = self.readElementHead()
+        # rootNode = {'parent': None, 'size': size, 'id': id, 'name': name, 'type': type_}
+        # try:
+            # self._readMasterElement(rootNode)
+        # except (EbmlInconsistentEmbeddingException) as e:
+            # pass
+        # return rootNode
+       
+    # def _readMasterElement(self, parentNode):
+        # '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        # because it can not recognize when to return to upper level element'''
+        # parentNode['children'] = []
+        # while parentNode['Size'] < 0 or self.position < parentNode['Size']:
+            # size, id, name, type_ = self.readElementHead()
+            # ###here check if this name cannot be contained by the parents
+            # #raise EbmlInconsistentEmbeddingException(name)            
+            # if id is None:#'malformed header    
+                # if parentNode['Size'] < 0:#'unknown-size' element
+                    # raise EbmlUnknownSizeException("Malformed element header while parent is unknown-size element.")
+                # self.read(parentNode['Size'] - self.position)             
+                # return
+            # if type_ is None:#Unknown element
+                # if size < 0:#'unknown-size' element
+                    # if parentNode['Size'] < 0:#'unknown-size' element
+                        # raise EbmlUnknownSizeException("Unknown element (id=%x) with unknown-size while parent is unknown-size element."%id)
+                    # self.read(parentNode['Size'] - self.position)             
+                    # return
+                # self.read(size)
+                # continue
+            # if type_ is SINT:
+                # value = self.readInteger(size, True)
+            # elif type_ is UINT:
+                # value = self.readInteger(size, False)
+            # elif type_ is FLOAT:
+                # value = self.readFloat(size)
+            # elif type_ is STRING:
+                # value = self.read(size).decode('ascii')
+            # elif type_ is UTF8:
+                # value = self.read(size).decode('utf-8')
+            # elif type_ is DATE:
+                # us = self.readInteger(size, True) / 1000.0  # ns to us
+                # from datetime import datetime, timedelta
+                # value = datetime(2001, 1, 1) + timedelta(microseconds=us)
+            # elif type_ is MASTER:
+                # node = {'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_}
+                # parentNode['children'].append(node)
+                # try:
+                    # self._readMasterElement(node[name], node)
+                # except (EbmlUnknownSizeException) as e:
+                    # if parentNode['Size'] < 0:
+                        # raise e
+                    # self.read(parentNode['Size'] - self.position)                                    
+                    # return 
+                # except (EbmlInconsistentEmbeddingException) as e:
+                    # ###if this level is not appropriate to insert:
+                    # ###    raise e
+                    # ###parentNode['children'].append(node)  
+                    # pass
+                # continue    
+            # elif type_ is BINARY:
+                # value = BinaryData(self.read(size))
+            # else:
+                # assert False, type_
+            # parentNode['children'].append({'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_, 'value': value})
       
        
 
