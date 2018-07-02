@@ -1,7 +1,7 @@
 #Non-seekable EBML (matroska) stream parser
 #By Sergey Stoyan <sergey.stoyan@gmail.com>
 #This code is based on this Matroska parser https://github.com/exaile/exaile/blob/master/xl/metadata/_matroska.py
-#It was upgraded to parse non-seekable streams. Also, several mistakes were fixed.
+#It was heavily readone to parse non-seekable streams. Also, several mistakes were fixed.
 
 #from __future__ import print_function
 from logger import LOG
@@ -11,6 +11,9 @@ from struct import pack, unpack
 SINT, UINT, FLOAT, STRING, UTF8, DATE, MASTER, BINARY = range(8)
 
 class EbmlException(Exception):
+    pass
+    
+class EbmlUnknownSizeException(Exception):
     pass
 
 class EbmlWarning(Warning):
@@ -141,35 +144,50 @@ class EbmlReader:
             raise EbmlException("don't know how to read %r-byte float" % length)
   
     def ReadLevel0Element(self):
-        '''!!!ATTENTION: this methos is not appropriate for parsing unknown-size elements
-        because it does not return to upper level'''
+        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        because it can not recognize when to return to upper level element'''
         self.position = 0
+        rootNode = {}
         size, id, name, type_ = self.readElementHead()
-        return self._readElement(0, size)
+        rootNode[name] = {}
+        self._readElement(rootNode[name], size)
+        try:
+            self._readElement(rootNode[name], size)
+        except (EbmlUnknownSizeException) as e:
+            if size < 0:
+                raise e
+            read(size - self.position)
+        return rootNode
         
-    def readElementHead(self)    
+    def readElementHead(self):  
         try:
             id = self.readElementId()
-        except EbmlException as e:
-            # Invalid EBML header. We can't reliably get any more data from
-            # this level, so just return anything we have.
-            raise EbmlException("Invalid EBML header")
+        except EbmlException as e:  # Invalid EBML header. 
+            return (-1, None, None, None)
         size = self.readElementSize()       
         try:
             name, type_ = self.elementIds2nameType[id]
         except:
-            if size < 0:#'unknown-size' element
-                raise EbmlException("Unknown element (id=%x) with unknown-size. Parsing is impossible."%id)
+            pass
         return (size, id, name, type_)
         
-    def _readElement(self, level, parentSize):
-        '''!!!ATTENTION: this methos is not appropriate for parsing unknown-size elements
-        because it does not return to upper level'''
-        node = {}
+    def _readElement(self, node, parentSize):
+        '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
+        because it can not recognize when to return to upper level element'''
         # Iterate over current node's children.
         while self.position < parentSize:
             size, id, name, type_ = self.readElementHead()
-            if(size < 0):#'unknown-size' element
+            if id is None:#'malformed header    
+                if parentSize < 0:#'unknown-size' element
+                    raise EbmlUnknownSizeException("Malformed element header while parent is unknown-size element.")
+                read(parentSize - self.position)             
+                return
+            if type_ is None:#Unknown element
+                if size < 0:#'unknown-size' element
+                    if parentSize < 0:#'unknown-size' element
+                        raise EbmlUnknownSizeException("Unknown element (id=%x) with unknown-size while parent is unknown-size element."%id)
+                    read(parentSize - self.position)             
+                    return
                 read(size)
                 continue
             try:
@@ -195,7 +213,14 @@ class EbmlReader:
                     value = datetime(2001, 1, 1) + timedelta(microseconds=us)
                 elif type_ is MASTER:
                     #LOG.info('MASTER')
-                    value = self._readElement(level + 1, size)
+                    node[name] = {}
+                    try:
+                        self._readElement(node[name], size)
+                    except (EbmlUnknownSizeException) as e:
+                        if parentSize < 0:
+                            raise e
+                        read(parentSize - self.position)                                    
+                        return                        
                 elif type_ is BINARY:
                     #LOG.info('BINARY')
                     value = BinaryData(self.stream.read(size))
@@ -205,10 +230,9 @@ class EbmlReader:
                 #LOG.exception(sys.exc_info()[0])
                 print(sys.exc_info()[0])
             else:
-                if n not in value:
-                    value[n] = []
-                node[name].append(value)                
-        return node
+                if name not in node:
+                    node[name] = []
+                node[name].append(value)
       
        
 
