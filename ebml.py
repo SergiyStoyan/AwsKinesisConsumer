@@ -10,9 +10,16 @@ SINT, UINT, FLOAT, STRING, UTF8, DATE, MASTER, BINARY = range(8)
 #!!!not complete list!!!
 EbmlElementIds2NameType = {
     0x1a45dfa3: ('EBML', MASTER),
+    0x4286: ('EBMLVersion', UINT),
+	0x42f7: ('EBMLReadVersion', UINT),
+	0x42f2: ('EBMLMaxIDLength', UINT),
+	0x42f3: ('EBMLMaxSizeLength', UINT),
+	0x4282: ('DocType', UTF8),
+	0x4287: ('DocTypeVersion', UINT),
+	0x4285: ('DocTypeReadVersion', UINT),
     # Segment
     0x18538067: ('Segment', MASTER),
-    # Segment Information
+    0x73a4: ('SegmentUID', BINARY),
     0x1549A966: ('Info', MASTER),
     0x7384: ('SegmentFilename', UTF8),
     0x2AD7B1: ('TimecodeScale', UINT),
@@ -132,16 +139,23 @@ def bchr(n):
     """chr() that always returns bytes in Python 2 and 3"""
     return pack('B', n)
 
+class EbmlElementHead:
+    def __init__(self, size, id, name, type_):
+        self.Size = size 
+        self.Id = id
+        self.Name = name
+        self.Type = type_    
+    
 class EbmlReader(object):
 
-    def __init__(self, source, interstingElementNames=None):
+    def __init__(self, source, interstingElementNames=None, elementHeadCalback=None):
         self.interstingElementNames = interstingElementNames
         try:
             self.stream = open(source, 'rb')
         except:
             self.stream = source
-        self.lastReadHeadElementName = None
-        self.lastReadHeadElementSize = -1
+        self.position = 0
+        self.ElementHeadCalback = elementHeadCalback
 
     def __del__(self):
         try:
@@ -267,21 +281,27 @@ class EbmlReader(object):
             name = None
             type_ = None
         #LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.position, size, id, name, type_))
-        self.lastReadHeadElementName = name
-        self.lastReadHeadElementSize = size
+        self.lastElementHead = EbmlElementHead(size, id, name, type_)
+        if self.ElementHeadCalback != None:
+            self.ElementHeadCalback(self, size, id, name, type_)
         return (size, id, name, type_)
           
-    def ReadNextElement(self):
-        self.position = 0
+    def ReadNextElement(self):    
         size, id, name, type_ = self.readElementHead()   
         while True:
+            if self.interstingElementNames is None:
+                if type_ == MASTER:
+                    return (size, id, name, type_, '<MASTER>')
+                break
             if type_ == MASTER:
                 if name in self.interstingElementNames:
                     return (size, id, name, type_, '<MASTER>')
                 size, id, name, type_ = self.readElementHead() 
                 continue
             if size < 0:
-                raise Exception('Not MASTER element with unknown size.')
+                if type_ is None:
+                    raise Exception('Unknown element (id=%x) with unknown size.'%id)
+                raise Exception('Element (id=%x, name=%s) with unknown size.'%(id,name))
             if name is None or name not in self.interstingElementNames:
                 self.read(size)
                 size, id, name, type_ = self.readElementHead()   
@@ -302,19 +322,16 @@ class EbmlReader(object):
             us = self.readInteger(size, True) / 1000.0  # ns to us
             from datetime import datetime, timedelta
             value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-        elif type_ is MASTER:
-            #value = self._readMasterChildElements(size) 
-            raise Exception("Should not read MASTER here.")
+        #elif type_ is MASTER:
+        #    value = self._readMasterChildElements(size) 
         elif type_ is BINARY:
             value = BinaryData(self.read(size))
         else:
             assert False, type_
         return (size, id, name, type_, value)
-            
-        
-
-    
+                
     # def ReadLevel0Element(self):
+        '''recurcive parser. Needs further development'''
         # '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
         # because it can not recognize when to return to upper level element'''
         # self.position = 0

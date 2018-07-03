@@ -33,10 +33,10 @@ class Parser:
     def dispose(self):
         if self.disposed:
             return
-        self.disposed = True
-        LOG.info('Shutting down Parser...')
-        
-        self.run_kinesis_stream_reader = False
+        with self.lock:
+            self.disposed = True
+            LOG.info('Shutting down Parser...')        
+            self.run_kinesis_stream_reader = False
         
     def __init__(self,
         stream_name,
@@ -126,8 +126,11 @@ class Parser:
             interstingElementNames = [
                 'Segment', 
                 'Cluster',
-                #'TagName',
-                #'TagString',
+                'Tags',
+                'Tag',
+                'SimpleTag',
+                'TagName',
+                'TagString',
                 'CodecID',
                 'CodecName',
                 'PixelWidth',
@@ -147,7 +150,8 @@ class Parser:
     'Slices', 
     'BlockAdditions',
             ]
-            er = EbmlReader(kinesis_stream, interstingElementNames)
+            interstingElementNames = None
+            er = EbmlReader(kinesis_stream, interstingElementNames, self.print_ebml_element_head)
                         
             self.frame_count = 0
             self.next_frame_time = 0.0
@@ -165,11 +169,11 @@ class Parser:
                 #LOG.info('@@@@@@@@@@@@@@@@@@@ %d'%i)
                 try:
                     size, id, name, type_, value = er.ReadNextElement()
-                    if type_ != ebml.BINARY:
-                        LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, id, type_, value))
-                    else:
-                        LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, id, type_, '<BINARY>'))
-                    if name == 'TagName':
+                    self.print_ebml_element(size, id, name, type_, value)
+                    if name == 'Segment':
+                        print('position:%d'%er.position)
+                        er.position = 0
+                    elif name == 'TagName':
                         lastTagName = value
                     elif name == 'TagString' and name in tagNames2string:
                         tagNames2string[name] = value                              
@@ -188,6 +192,18 @@ class Parser:
             LOG.info('exiting kinesis_stream_reader')
             self.dispose()
 
+    def print_ebml_element_head(self, ebmlParser, size,  id, name, type_):
+        LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (ebmlParser.position, size, hex(id), name, type_))
+            
+    def print_ebml_element(self, name, size, id, type_, value):
+        if type_ != ebml.BINARY:
+            LOG.info('value: %s' % (value))
+        else:
+            LOG.info('value: %s' % ('<BINARY>')) 
+        # if type_ != ebml.BINARY:
+            # LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, value))
+        # else:
+            # LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, '<BINARY>'))             
 
     def catch_frame(self,
         tags,
