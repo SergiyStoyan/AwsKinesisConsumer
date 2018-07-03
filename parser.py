@@ -123,25 +123,25 @@ class Parser:
     ):
         try:  
             #from pprint import pprint
-            interstingElementNames = [
-                'Segment', 
-                'Cluster',
-                'Tags',
-                'Tag',
-                'SimpleTag',
-                'TagName',
-                'TagString',
-                'CodecID',
-                'CodecName',
-                'PixelWidth',
-                'PixelHeight',
-                'Video',
-                'TrackEntry',
-                'Tracks',
-                'Cluster',
-    'Timecode',
-    'Position',
-    'PrevSize',
+            InterestingElementNames = [
+                 'Segment', 
+                # 'Cluster',
+                # 'Tags',
+                # 'Tag',
+                # 'SimpleTag',
+                 'TagName',
+                 'TagString',
+                 'CodecID',
+                # 'CodecName',
+                # 'PixelWidth',
+                # 'PixelHeight',
+                # 'Video',
+                # 'TrackEntry',
+                # 'Tracks',
+     'Timecode',
+    # 'Position',
+    # 'PrevSize',
+    'CodecPrivate',
     'BlockGroup', 
     'Block', 
     'BlockVirtual',
@@ -150,8 +150,8 @@ class Parser:
     'Slices', 
     'BlockAdditions',
             ]
-            interstingElementNames = None
-            er = EbmlReader(kinesis_stream, interstingElementNames, self.print_ebml_element_head)
+            #InterestingElementNames = None
+            er = EbmlReader(kinesis_stream, InterestingElementNames)#, self.print_ebml_element_head)
                         
             self.frame_count = 0
             self.next_frame_time = 0.0
@@ -195,15 +195,15 @@ class Parser:
     def print_ebml_element_head(self, ebmlParser, size,  id, name, type_):
         LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (ebmlParser.position, size, hex(id), name, type_))
             
-    def print_ebml_element(self, name, size, id, type_, value):
+    def print_ebml_element(self, size, id, name, type_, value):
+        #if type_ != ebml.BINARY:
+        #    LOG.info('value: %s' % (value))
+        #else:
+        #    LOG.info('value: %s' % ('<BINARY>')) 
         if type_ != ebml.BINARY:
-            LOG.info('value: %s' % (value))
+            LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, value))
         else:
-            LOG.info('value: %s' % ('<BINARY>')) 
-        # if type_ != ebml.BINARY:
-            # LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, value))
-        # else:
-            # LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, '<BINARY>'))             
+            LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, '<BINARY>'))             
 
     def catch_frame(self,
         tags,

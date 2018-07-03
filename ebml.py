@@ -148,8 +148,8 @@ class EbmlElementHead:
     
 class EbmlReader(object):
 
-    def __init__(self, source, interstingElementNames=None, elementHeadCalback=None):
-        self.interstingElementNames = interstingElementNames
+    def __init__(self, source, interestingElementNames=None, elementHeadCalback=None):
+        self.InterestingElementNames = interestingElementNames
         try:
             self.stream = open(source, 'rb')
         except:
@@ -289,20 +289,18 @@ class EbmlReader(object):
     def ReadNextElement(self):    
         size, id, name, type_ = self.readElementHead()   
         while True:
-            if self.interstingElementNames is None:
-                if type_ == MASTER:
-                    return (size, id, name, type_, '<MASTER>')
+            if self.InterestingElementNames is None:
                 break
             if type_ == MASTER:
-                if name in self.interstingElementNames:
-                    return (size, id, name, type_, '<MASTER>')
+                if name in self.InterestingElementNames:
+                    break
                 size, id, name, type_ = self.readElementHead() 
                 continue
             if size < 0:
                 if type_ is None:
                     raise Exception('Unknown element (id=%x) with unknown size.'%id)
-                raise Exception('Element (id=%x, name=%s) with unknown size.'%(id,name))
-            if name is None or name not in self.interstingElementNames:
+                raise Exception('Element (id=%x, name=%s) with unknown size.'%(id, name))
+            if name is None or name not in self.InterestingElementNames:
                 self.read(size)
                 size, id, name, type_ = self.readElementHead()   
                 continue
@@ -322,8 +320,8 @@ class EbmlReader(object):
             us = self.readInteger(size, True) / 1000.0  # ns to us
             from datetime import datetime, timedelta
             value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-        #elif type_ is MASTER:
-        #    value = self._readMasterChildElements(size) 
+        elif type_ is MASTER:
+            value = '<MASTER>'
         elif type_ is BINARY:
             value = BinaryData(self.read(size))
         else:
