@@ -190,7 +190,7 @@ class Parser:
                                        stdin=sp.PIPE,
                                        stdout=sp.PIPE,
                                        #stderr=sp.PIPE,
-                                       bufsize=10**8,
+                                       bufsize=10**6,
                                        preexec_fn=os.setsid
                                 )
         #self.ffmpeg_process.communicate()
@@ -199,7 +199,7 @@ class Parser:
             from threading import Thread
             frame_parser_thread = Thread(target = self.frame_parser, args = (self.ffmpeg_process, ))                
             self.run_frame_parser = True
-            #frame_parser_thread.start()                
+            frame_parser_thread.start()                
         
             READ_BUFFER_SIZE = 100000
             total_bytes = 0
@@ -245,8 +245,8 @@ class Parser:
                     if self.TimeSpanBetweenFramesInSecs <= 0 or next_frame_time <= time.time():
                         next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
 
-                        if self.SaveFrames2Disk:
-                            frame_file = frame_dir + "/frame%d.png" % frame_count
+                        if self.frame_directory:
+                            frame_file = self.frame_directory + "/frame%d.png" % frame_count
                         LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
                             
                         image = np.fromstring(frame, np.uint8)
@@ -263,7 +263,7 @@ class Parser:
                                     pass
                                 del self.Frames[0]
                             
-                            if self.SaveFrames2Disk:
+                            if self.frame_directory:
                                 cv2.imwrite(frame_file, image)
                                 #image.save("frame_%d.jpg" % frame_count, image)                        
 
