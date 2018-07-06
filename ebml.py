@@ -149,13 +149,14 @@ class EbmlElementHead:
 class EbmlReader(object):
 
     def __init__(self, source, interestingElementNames=None, elementHeadCalback=None):
-        self.InterestingElementNames = interestingElementNames
         try:
             self.stream = open(source, 'rb')
         except:
             self.stream = source
         self.position = 0
+        self.InterestingElementNames = interestingElementNames
         self.ElementHeadCalback = elementHeadCalback
+        self.CopyBuffer = None #BytesIO
 
     def __del__(self):
         try:
@@ -164,8 +165,11 @@ class EbmlReader(object):
             pass
 
     def read(self, length):
-        self.position += length
-        return self.stream.read(length)            
+        bs = self.stream.read(length)            
+        self.position += len(bs)
+        if self.CopyBuffer:
+            self.CopyBuffer.write(bs)
+        return bs
         
     def readElementId(self):
         b = self.read(1)
