@@ -183,12 +183,13 @@ class Parser:
                         while lastTagName:#it is not the first segment  
                             try:
                                 frame = self.ffmpeg_process.stdout.read(FRAME_SIZE)
-                                LOG.info('frame length:%d'%len(frame))
+                                #LOG.info('frame length:%d'%len(frame))
                             except IOError:# the os throws an exception if there is no data
                                 LOG.info('!no frame from ffmpeg')
                                 break
-                            if self.catch_frames:  
-                                tags = copy.deepcopy(tagNames2string)
+                            if self.catch_frames:                                 
+                                from pprint import pprint   
+                                tags = copy.deepcopy(tagNames2string)                                
                                 self.catch_frame(tags, frame, 1920, 1080)                    
                         
                         bs = er.CopyBuffer.getvalue()
@@ -203,12 +204,12 @@ class Parser:
                     elif name == 'TagName':
                         lastTagName = value
                     elif name == 'TagString' and lastTagName in tagNames2string:
-                        tagNames2string[name] = value                              
+                        tagNames2string[lastTagName] = value       
                     #if self.catch_frames:
                         #tags = copy.deepcopy(tagNames2string)
                         #self.catch_frame(tags, frame)
                 except:
-                    LOG.exception(sys.exc_info()[0])
+                    LOG.exception('')
                     print('!!!!!!!!!!!!!!!!')
         except:
             LOG.exception('')
@@ -311,16 +312,16 @@ class Parser:
         if self.TimeSpanBetweenFramesInSecs <= 0 or self.next_frame_time <= time.time():
             next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
 
-        from pprint import pprint
-        s = 'frame%d\r\ntags:\r\n%s'%(self.frame_count, pprint(tags))
+        from pprint import pprint, pformat
+        s = 'frame%d\r\ntags:\r\n%s'%(self.frame_count, pformat(tags))
         if self.frame_directory:
             frame_file = self.frame_directory + "/frame%d.png" % self.frame_count
             s = '%s\r\nfile:%s'%(s, frame_file)
         LOG.info(s)
 
         image = np.fromstring(frame, np.uint8)
-        #image = image.reshape((width, height, 3))
-        image = image.reshape((1080,1920,3))
+        image = image.reshape((height, width, 3))
+        #image = image.reshape((1080,1920,3))
         #image2 = cv2.imdecode(image, cv2.CV_LOAD_IMAGE_COLOR)                                
 
         with self.lock:
