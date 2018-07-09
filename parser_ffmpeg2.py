@@ -67,6 +67,7 @@ class Parser:
             self.catch_frames = catch_frames  
             self.FrameQueueMaxLength = frame_queue_max_length
             self.TimeSpanBetweenFramesInSecs = time_span_between_frames_in_secs
+            self.next_frame_time = time.time()
             
             if save_frames2directory == True:
                 save_frames2directory = './_frames'                
@@ -154,9 +155,10 @@ class Parser:
     #'BlockDuration',
     #'Slices', 
     #'BlockAdditions',
+    'DocTypeReadVersion'
             ]
             #InterestingElementNames = None
-            er = ebml.EbmlReader(kinesis_stream, InterestingElementNames)#, self.print_ebml_element_head)
+            er = ebml.EbmlReader(kinesis_stream, InterestingElementNames, self.print_ebml_element_head)
                         
             self.frame_count = 0
             self.next_frame_time = 0.0
@@ -173,44 +175,42 @@ class Parser:
             
             er.CopyBuffer = io.BytesIO()
             lastTagName = None
+            currentTags = None 
+            FRAME_SIZE = 1920 * 1080 * 3   
             while self.run_kinesis_stream_reader:    
                 #LOG.info('@@@@@@@@@@@@@@@@@@@ %d'%i)
-                try:
-                    size, id, name, type_, value = er.ReadNextElement()
-                    self.print_ebml_element(size, id, name, type_, value)
-                    if name == 'Segment':   
-                        FRAME_SIZE = 1920 * 1080 * 3
-                        while lastTagName:#it is not the first segment  
-                            try:
-                                frame = self.ffmpeg_process.stdout.read(FRAME_SIZE)
-                                #LOG.info('frame length:%d'%len(frame))
-                            except IOError:# the os throws an exception if there is no data
-                                LOG.info('!no frame from ffmpeg')
-                                break
-                            if self.catch_frames:                                 
-                                from pprint import pprint   
-                                tags = copy.deepcopy(tagNames2string)                                
-                                self.catch_frame(tags, frame, 1920, 1080)                    
-                        
-                        bs = er.CopyBuffer.getvalue()
-                        LOG.info('CopyBuffer: %d, %d'%(len(bs), er.position))
-                        self.ffmpeg_process.stdin.write(bs)
-                        self.ffmpeg_process.stdin.flush()
-
-                        #print('position:%d'%er.position)
-                        er.position = 0
-                        er.CopyBuffer.close()
-                        er.CopyBuffer = io.BytesIO()
-                    elif name == 'TagName':
-                        lastTagName = value
-                    elif name == 'TagString' and lastTagName in tagNames2string:
-                        tagNames2string[lastTagName] = value       
-                    #if self.catch_frames:
-                        #tags = copy.deepcopy(tagNames2string)
-                        #self.catch_frame(tags, frame)
-                except:
-                    LOG.exception('')
-                    print('!!!!!!!!!!!!!!!!')
+                while currentTags:#it is not the first segment  
+                    try:
+                        #print('#########')
+                        self.ffmpeg_process.stdout.flush() 
+                        frame = self.ffmpeg_process.stdout.read(FRAME_SIZE)
+                        #LOG.info('frame length:%d'%len(frame))
+                    except IOError:# the os throws an exception if there is no data
+                        #LOG.exception('')
+                        LOG.info('!no frame from ffmpeg')
+                        break                                                          
+                    self.catch_frame(currentTags, frame, 1920, 1080)   
+                    
+                size, id, name, type_, value = er.ReadNextElement()
+                self.print_ebml_element(size, id, name, type_, value)
+                if name == 'DocTypeReadVersion': #the last element before next segment
+                    bs = er.CopyBuffer.getvalue()
+                    LOG.info('=====================CopyBuffer: %d, %d'%(len(bs), er.position))
+                    self.ffmpeg_process.stdin.write(bs)
+                    self.ffmpeg_process.stdin.flush()
+                    print('position:%d'%er.position)
+                    er.position = 0
+                    er.CopyBuffer.close()
+                    er.CopyBuffer = io.BytesIO()
+                    
+                    currentTags = copy.deepcopy(tagNames2string)  
+                elif name == 'TagName':
+                    lastTagName = value
+                elif name == 'TagString' and lastTagName in tagNames2string:
+                    tagNames2string[lastTagName] = value       
+                #if self.catch_frames:
+                    #tags = copy.deepcopy(tagNames2string)
+                    #self.catch_frame(tags, frame)
         except:
             LOG.exception('')
         finally:
@@ -309,8 +309,13 @@ class Parser:
     ):       
         self.frame_count += 1
         
-        if self.TimeSpanBetweenFramesInSecs <= 0 or self.next_frame_time <= time.time():
-            next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
+        if not self.catch_frames:  
+            return
+            
+        if self.TimeSpanBetweenFramesInSecs > 0:
+            if self.next_frame_time > time.time():
+                return
+            self.next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
 
         from pprint import pprint, pformat
         s = 'frame%d\r\ntags:\r\n%s'%(self.frame_count, pformat(tags))
@@ -318,7 +323,7 @@ class Parser:
             frame_file = self.frame_directory + "/frame%d.png" % self.frame_count
             s = '%s\r\nfile:%s'%(s, frame_file)
         LOG.info(s)
-
+        return
         image = np.fromstring(frame, np.uint8)
         image = image.reshape((height, width, 3))
         #image = image.reshape((1080,1920,3))
@@ -334,9 +339,10 @@ class Parser:
                 except:
                     pass
                 del self.Frames[0]
-
+                
             if self.frame_directory:
                 cv2.imwrite(frame_file, image)
+                print(frame_file)
                 #image.save("frame_%d.jpg" % self.frame_count, image)   
 
                             
@@ -371,7 +377,7 @@ if __name__ == '__main__':#not to run when this module is being imported
         stream_name = sys.argv[1]
     with Parser(
         stream_name = 'test8',
-        time_span_between_frames_in_secs = 0.3,
+        time_span_between_frames_in_secs = -0.3,
         frame_queue_max_length = 20,
         save_frames2directory = './_frames',
         catch_frames = True,
