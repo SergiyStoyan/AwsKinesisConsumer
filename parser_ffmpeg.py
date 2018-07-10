@@ -247,7 +247,9 @@ class Parser:
 
                         if self.frame_directory:
                             frame_file = self.frame_directory + "/frame%d.png" % frame_count
-                        LOG.info('frame ' + str(frame_count) + ': ' + frame_file)
+                        else:
+                            frame_file = None
+                        LOG.info('frame:%d,file:%s'%(frame_count,frame_file))
                             
                         image = np.fromstring(frame, np.uint8)
                         image = image.reshape((1080,1920,3))
@@ -295,11 +297,11 @@ class Parser:
 
     def StartCatchFrames(self,
                 ):
-        self.catch_frames = False
+        self.catch_frames = True
                
     def StopCatchFrames(self,
                ):
-        self.catch_frames = True
+        self.catch_frames = False
 
     
 
@@ -311,7 +313,7 @@ if __name__ == '__main__':#not to run when this module is being imported
         stream_name = 'test8',
         time_span_between_frames_in_secs = 0.3,
         frame_queue_max_length = 20,
-        save_frames2directory = './_frames',
+        save_frames2directory = False,
         catch_frames = True,
         ) as p:
                 
@@ -331,7 +333,7 @@ if __name__ == '__main__':#not to run when this module is being imported
             print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
             
         p.StartCatchFrames()
-        time.sleep(10)
+        time.sleep(30)
         f = p.GetFrame()#last frame
         if f is not None:
             print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))

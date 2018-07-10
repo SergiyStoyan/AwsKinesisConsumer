@@ -385,7 +385,7 @@ class Parser:
 
     
 
-if __name__ == '__main__':#not to run when this module is being imported
+if __name__ == '__main__':#not to run when this module is imported
     import sys
     if len(sys.argv) > 1:
         stream_name = sys.argv[1]
@@ -393,7 +393,7 @@ if __name__ == '__main__':#not to run when this module is being imported
         stream_name = 'test8',
         time_span_between_frames_in_secs = -0.3,
         frame_queue_max_length = 20,
-        save_frames2directory = False,
+        save_frames2directory = True,
         catch_frames = True,
         ) as p:
                 

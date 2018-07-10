@@ -129,7 +129,7 @@ class Parser:
         kinesis_stream
     ):
         try:  
-            InterestingElementNames = [
+            interestingElementNames = [
                  'Segment', 
                 # 'Cluster',
                 # 'Tags',
@@ -157,8 +157,8 @@ class Parser:
     #'BlockAdditions',
     'DocTypeReadVersion'
             ]
-            #InterestingElementNames = None
-            er = ebml.EbmlReader(kinesis_stream, InterestingElementNames, self.print_ebml_element_head)
+            #interestingElementNames = None
+            er = ebml.EbmlReader(kinesis_stream, interestingElementNames)#, self.print_ebml_element_head)
                         
             self.frame_count = 0
             self.next_frame_time = 0.0
@@ -360,14 +360,15 @@ class Parser:
             except:
                 LOG.exception(sys.exc_info()[0])
 
+                
 
     def StartCatchFrames(self,
                 ):
-        self.catch_frames = False
+        self.catch_frames = True
                
     def StopCatchFrames(self,
                ):
-        self.catch_frames = True
+        self.catch_frames = False
 
     
 
