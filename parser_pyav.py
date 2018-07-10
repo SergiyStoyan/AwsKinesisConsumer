@@ -26,7 +26,27 @@ class Tags:
         self.AWS_KINESISVIDEO_PRODUCER_TIMESTAMP = None
         self.AWS_KINESISVIDEO_MILLIS_BEHIND_NOW = None
         self.AWS_KINESISVIDEO_CONTINUATION_TOKEN = None
-        self.position = -1
+        self.position = -1    
+
+    def __str__(self):
+        from pprint import pprint, pformat       
+        return pformat(vars(self))
+
+class Frame:
+    def __init__(self,
+                 image,
+                 id,
+                 tags,
+                 file,
+                 ):
+        self.Image = image
+        self.Id = id
+        self.Tags = tags
+        self.File = file
+        self.Time = time.time()
+
+    def __str__(self):
+        return 'Id:%d\r\nTags:%s\r\nFile:%s\r\nTime:%d'%(self.Id, self.Tags, self.File, self.Time)
 
 class Parser:
     
@@ -271,7 +291,7 @@ class Parser:
             for packet in self.kinesis_stream_pipe_R.demux(video=0):
                 if not self.run_libav_parser:
                     break
-                print('pos:%d'%packet.pos)
+                #print('pos:%d'%packet.pos)
                 with self.lock:
                     tags_i = -1
                     for i, t in enumerate(self.tagLine):
@@ -313,17 +333,15 @@ class Parser:
                 return
             self.next_frame_time = time.time() + self.TimeSpanBetweenFramesInSecs
 
-        from pprint import pprint, pformat
-        s = 'frame%d\r\ntags:\r\n%s'%(frame_id, pformat(vars(tags)))
         if self.frame_directory:
             frame_file = self.frame_directory + "/frame%d.png" % frame_id
-            s = '%s\r\nfile:%s'%(s, frame_file)
         else:
-            frame_file = None                
-        LOG.info(s)                         
+            frame_file = None               
 
         with self.lock:
-            self.Frames.append({'image':image, 'time':time.time(), 'tags':tags, 'file':frame_file})
+            f = Frame(image, frame_id, tags, frame_file)             
+            #LOG.info(f)             
+            self.Frames.append(f)
 
             if len(self.Frames) > self.FrameQueueMaxLength:
                 i = self.Frames[0]
@@ -350,17 +368,20 @@ class Parser:
                 if index < 0:
                     index = l - 1
                     return self.Frames[index]
+                return None
             except:
                 LOG.exception(sys.exc_info()[0])
 
 
     def StartCatchFrames(self,
                 ):
-        self.catch_frames = False
+        with self.lock:
+            self.catch_frames = True
                
     def StopCatchFrames(self,
                ):
-        self.catch_frames = True
+        with self.lock:
+            self.catch_frames = False
 
     
 
@@ -378,21 +399,18 @@ if __name__ == '__main__':#not to run when this module is being imported
                 
         time.sleep(3)
         f = p.GetFrame(0)#thread safe method
-        if f is not None:
-            print("First frame: (%d), %s\r\n" % (f['time'], f['file']))
+        print("First frame: %s" % f)
 
         time.sleep(3)
         f = p.GetFrame()#last frame
-        if f is not None:
-            print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
+        print("Last frame: %s" % f)
 
-        #p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
-        #for f in p.Frames:
-        #    print("Frame: (%d), %s\r\n" % (f['time'], f['file']))                
+        p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
+        for f in p.Frames:
+            print("Frame: %s" % f)
             
-        #p.StartCatchFrames()
+        p.StartCatchFrames()
         time.sleep(30)
         f = p.GetFrame()#last frame
-        if f is not None:
-            print("Last frame: (%d), %s\r\n" % (f['time'], f['file']))
+        print("Last frame: %s" % f)
     exit()
