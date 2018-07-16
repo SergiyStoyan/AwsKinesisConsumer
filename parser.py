@@ -364,7 +364,7 @@ class Parser:
     def GetFrame(self,
                  index = -1  #last one
                  ):
-                 '''this method is thread safe and can be used to access self.Frames anytime.'''
+        '''this method is thread safe and can be used to access self.Frames anytime.'''
         with self.lock:
             try:
                 l = len(self.Frames)
@@ -380,7 +380,7 @@ class Parser:
 
     def StartCatchFrames(self,
                 ):
-                '''this method must be called before direct accessing to self.Frames, to avoid concurrency.'''
+        '''this method must be called before direct accessing to self.Frames, to avoid concurrency.'''
         with self.lock:
             self.catch_frames = True
                
