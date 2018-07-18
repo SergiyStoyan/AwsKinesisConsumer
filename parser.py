@@ -81,13 +81,14 @@ class Parser:
             
             self.run_kinesis_stream_reader = False
             try:
-                self.kinesis_stream.close()
+                #self.kinesis_stream.close()
+                pass
             except:
                 LOG.exception(sys.exc_info()[0])
 
             try:
-            #if self.kinesis_stream_pipe_W:
-                #self.kinesis_stream_pipe_W.close()
+                #if self.kinesis_stream_pipe_W:
+                    #self.kinesis_stream_pipe_W.close()
                 pass
             except:
                 LOG.exception(sys.exc_info()[0])
@@ -257,7 +258,7 @@ class Parser:
                     tags = Tags()
 
                     bs = er.CopyBuffer.getvalue()
-                    LOG.info('=====================CopyBuffer: %d, %d'%(len(bs), er.position))
+                    #LOG.info('=====================CopyBuffer: %d, %d'%(len(bs), er.position))
                     self.kinesis_stream_pipe_W.write(bs)
                     self.kinesis_stream_pipe_W.flush()
                     er.CopyBuffer.close()
@@ -291,11 +292,9 @@ class Parser:
             #packet_count = 0
             import av
             self.kinesis_stream_pipe_R = av.open(kinesis_stream_pipe)
-            #print(self.kinesis_stream_pipe_R.dumps_format())  
             for packet in self.kinesis_stream_pipe_R.demux(video=0):
                 if not self.run_libav_parser:
                     break
-                #print('pos:%d'%packet.pos)
                 with self.lock:
                     tags_i = -1
                     for i, t in enumerate(self.tagLine):
@@ -308,7 +307,6 @@ class Parser:
                     else:
                         tags = self.tagLine[tags_i]
                         del self.tagLine[ : tags_i]
-                #packet_count += 1
                 #print('i:%d'%packet_count)#about 850 packet for 35 secs if no further processing
                 if not self.catch_frames:  
                     continue            
@@ -362,18 +360,17 @@ class Parser:
 
                             
     def GetFrame(self,
-                 index = -1  #last one
+                 index = None  #last one
                  ):
         '''this method is thread safe and can be used to access self.Frames anytime.'''
         with self.lock:
             try:
                 l = len(self.Frames)
-                if index >= l or l < 1:
-                    return
-                if index < 0:
+                if not index:
                     index = l - 1
-                    return self.Frames[index]
-                return None
+                if index < 0 or index >= l:
+                    return None
+                return self.Frames[index]
             except:
                 LOG.exception(sys.exc_info()[0])
 
@@ -399,7 +396,7 @@ if __name__ == '__main__':#not to run when this module is imported
         stream_name = 'test8',
         time_span_between_frames_in_secs = -0.3,
         frame_queue_max_length = 20,
-        save_frames2directory = True,
+        save_frames2directory = False,
         catch_frames = True,
         ) as p:
                 
@@ -416,7 +413,7 @@ if __name__ == '__main__':#not to run when this module is imported
             print("Frame: %s" % f)
             
         p.StartCatchFrames()
-        time.sleep(30)
+        time.sleep(10)
         f = p.GetFrame()#get the last frame
         print("Last frame: %s" % f)
     exit()
