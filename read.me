@@ -1,4 +1,60 @@
-	USAGE:
+    AWS Kinesis Video Stream Parser
 
-See how to use Parser class and its parameters in the bottom lines of parser.py 
+DEPLOYMENT:
+-------------------------------------------------------------------
+Ubuntu:
+
+- refresh the repositories:
+$ sudo apt update
+
+
+- install Python 2.7 (later version should work as well but not tested):
+$ sudo apt install python2.7 python-pip
+
+
+- install boto3:
+$ pip install boto3
+
+
+- install OpenCV:
+$ pip install opencv-python
+
+This package name may vary depending on system. 
+Also, when running the parser it may throw a error somewhat like 'error while loading libraries: libSM.so.6'. It should be healed by:
+$ sudo apt-get install libice6 libsm6 libxt6 libxrender1 libfontconfig1 libcups2
+
+if no help then ask google.
+(It is possible not use opencv at all. Then the code will be slightly slower.)
+
+
+- install general dependencies for PyAV:
+$ sudo apt-get install -y python-dev pkg-config
+
+
+- install library components for PyAV:
+$ sudo apt-get install -y \
+    libavformat-dev libavcodec-dev libavdevice-dev \
+    libavutil-dev libswscale-dev libavresample-dev libavfilter-dev
+
+
+- install PyAV (see https://mikeboers.github.io/PyAV/installation.html):
+$ pip install av
+
+
+- set kinesis credentials in _settings.py;
+
+
+- now Parser is ready for test launch:
+$ python ./parser.py
+
+This command will run the sample code in the end of parser.py
+
+
+
+USAGE:
+-------------------------------------------------------------------
+
+Import Parser class into your python code can be and use it as shown in in the bottom lines of parser.py 
+Logging options are set in logger.py
+
 
