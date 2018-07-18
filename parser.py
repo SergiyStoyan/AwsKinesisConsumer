@@ -20,6 +20,7 @@ import signal
 import threading
 import ebml
 import copy
+import traceback
 
     
 class Tags:
@@ -74,7 +75,7 @@ class Parser:
         with self.lock:
             self.disposed = True
             
-            LOG.info('Shutting down Parser...') 
+            LOG.info('Shutting down Parser...\r\n%s' % '\r\n'.join(traceback.format_stack())) 
             
             #signal.signal(signal.SIGALRM, self.dispose_handler)
             signal.alarm(3) # produce SIGALRM in ... seconds
@@ -400,20 +401,24 @@ if __name__ == '__main__':#not to run when this module is imported
         catch_frames = True,
         ) as p:
                 
-        time.sleep(3)
-        f = p.GetFrame(0)#thread safe method
-        print("First frame: %s" % f)
+        #time.sleep(1)
+        #f = p.GetFrame(0)#thread safe method
+        #print("First frame: %s" % f)
 
         time.sleep(3)
         f = p.GetFrame()#get the last frame
         print("Last frame: %s" % f)
 
-        p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
-        for f in p.Frames:
-            print("Frame: %s" % f)
-            
-        p.StartCatchFrames()
-        time.sleep(10)
-        f = p.GetFrame()#get the last frame
-        print("Last frame: %s" % f)
+        #p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
+        #for f in p.Frames:
+        #    print("Frame: %s" % f)
+        
+        lastId = f.Id
+        for i in range(0, 180):
+        #p.StartCatchFrames()
+            time.sleep(10)
+            f = p.GetFrame()#get the last frame
+            print("Last frame: %s" % f)
+            print("Caught frames: %d" % (f.Id - lastId))
+            lastId = f.Id
     exit()
