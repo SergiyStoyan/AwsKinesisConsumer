@@ -3,12 +3,14 @@ by Sergey Stoyan: sergey.stoyan@gmail.com
 
 AWS kinesis video stream consumer. 
 Allows to extract video frames.
+See the usage example in the end of parser.py
 
 Based on PyAV (https://github.com/mikeboers/PyAV). 
 '''
 
 from logger import LOG
 import settings
+import ebml
 import os
 import sys
 import boto3
@@ -19,7 +21,6 @@ import cv2 #can be replaced with Image lib
 import io
 import numpy as np
 import threading
-import ebml
 #import copy
 import traceback
 from threading import Thread
@@ -517,8 +518,6 @@ class Parser:
     
 #USAGE example
 if __name__ == '__main__':#not to run when this module is imported
-    if len(sys.argv) > 1:
-        stream_name = sys.argv[1]
         
     import signal
     def signal_handler(sig, frame):
@@ -527,8 +526,13 @@ if __name__ == '__main__':#not to run when this module is imported
         sys.exit(0)
     signal.signal(signal.SIGINT, signal_handler)
     
+    if len(sys.argv) > 1:
+        stream_name = sys.argv[1]
+    else:
+        stream_name = 'test11'
+
     with Parser(
-        stream_name = 'test11',
+        stream_name = stream_name,
         time_span_between_frames_in_secs = -0.3,
         frame_queue_max_length = 20,
         save_frames2directory = False,
