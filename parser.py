@@ -371,7 +371,7 @@ class Parser:
             LOG.exception(sys.exc_info()[0])
 
         finally:
-            LOG.info('kinesis_stream_reader exiting...:\r\run_kinesis_stream_reader=%s' % (self.run_kinesis_stream_reader))
+            LOG.info('kinesis_stream_reader exiting...:\r\nrun_kinesis_stream_reader=%s' % (self.run_kinesis_stream_reader))
             try:
                 if ebmlReader and ebmlReader.Position > 1000000:
                     self.starter(False)
@@ -550,16 +550,14 @@ if __name__ == '__main__':#not to run when this module is imported
         #p.StopCatchFrames()        #!!!p.Frames should be accessed only after StopCatchFrames() to avoid concurrency!!!
         #for f in p.Frames:
         #    print('Frame: %s' % f)
-        
-        p.StartCatchFrames()
+                 
+        import datetime   
+        last_time = datetime.datetime.now()
         if f:
             lastId = f.Id
         else:
             lastId = 0
-         
-        import datetime   
-        last_time = datetime.datetime.now()
-
+        p.StartCatchFrames()
         for i in range(0, 360):
             time.sleep(10)
             f = p.GetLastFrame()
