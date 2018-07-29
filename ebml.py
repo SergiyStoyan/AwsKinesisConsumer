@@ -1,5 +1,8 @@
-#Non-seekable EBML (matroska) stream parser
-#By Sergey Stoyan <sergey.stoyan@gmail.com>
+'''
+by Sergey Stoyan: sergey.stoyan@gmail.com
+
+A very simple, non-seekable EBML (matroska) stream parser
+'''
 
 from logger import LOG
 import sys
@@ -148,12 +151,17 @@ class EbmlElementHead:
     
 class EbmlReader(object):
 
-    def __init__(self, source, interestingElementNames=None, elementHeadCalback=None):
+    def __init__(self, 
+                 source,
+                 interestingElementNames = None, 
+                 elementHeadCalback = None
+                 ):
         try:
             self.stream = open(source, 'rb')
         except:
             self.stream = source
-        self.position = 0
+        self.stream_is_open = True
+        self.Position = 0
         self.InterestingElementNames = interestingElementNames
         self.ElementHeadCalback = elementHeadCalback
         self.CopyBuffer = None #BytesIO
@@ -165,8 +173,11 @@ class EbmlReader(object):
             pass
 
     def read(self, length):
-        bs = self.stream.read(length)            
-        self.position += len(bs)
+        bs = self.stream.read(length) 
+        read_bytes = len(bs)
+        self.Position += read_bytes
+        if read_bytes < length:
+            self.stream_is_open = False
         if self.CopyBuffer:
             self.CopyBuffer.write(bs)
         return bs
@@ -284,11 +295,14 @@ class EbmlReader(object):
         except:
             name = None
             type_ = None
-        #LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.position, size, id, name, type_))
+        #LOG.info('Position: %d, size:%d, id:%s, name:%s, type_:%s' % (self.Position, size, id, name, type_))
         self.lastElementHead = EbmlElementHead(size, id, name, type_)
         if self.ElementHeadCalback != None:
             self.ElementHeadCalback(self, size, id, name, type_)
         return (size, id, name, type_)
+
+    def IsStreamOpen():
+        return self.stream_is_open
           
     def ReadNextElement(self):    
         size, id, name, type_ = self.readElementHead()   
@@ -301,9 +315,11 @@ class EbmlReader(object):
                 size, id, name, type_ = self.readElementHead() 
                 continue
             if size < 0:
+                if id is None:
+                    raise Exception('Unknown element id.')
                 if type_ is None:
-                    raise Exception('Unknown element (id=%x) with unknown size.'%id)
-                raise Exception('Element (id=%x, name=%s) with unknown size.'%(id, name))
+                    raise Exception('Unknown element (id=%x) with unknown size.' % id)
+                raise Exception('Element (id=%x, name=%s) with unknown size.' % (id, name))
             if name is None or name not in self.InterestingElementNames:
                 self.read(size)
                 size, id, name, type_ = self.readElementHead()   
@@ -331,78 +347,4 @@ class EbmlReader(object):
         else:
             assert False, type_
         return (size, id, name, type_, value)
-                
-    # def ReadLevel0Element(self):
-        '''recurcive parser. Needs further development'''
-        # '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
-        # because it can not recognize when to return to upper level element'''
-        # self.position = 0
-        # size, id, name, type_ = self.readElementHead()
-        # rootNode = {'parent': None, 'size': size, 'id': id, 'name': name, 'type': type_}
-        # try:
-            # self._readMasterElement(rootNode)
-        # except (EbmlInconsistentEmbeddingException) as e:
-            # pass
-        # return rootNode
-       
-    # def _readMasterElement(self, parentNode):
-        # '''!!!ATTENTION: this methos is not appropriate for parsing streams with unknown-size elements
-        # because it can not recognize when to return to upper level element'''
-        # parentNode['children'] = []
-        # while parentNode['Size'] < 0 or self.position < parentNode['Size']:
-            # size, id, name, type_ = self.readElementHead()
-            # ###here check if this name cannot be contained by the parents
-            # #raise EbmlInconsistentEmbeddingException(name)            
-            # if id is None:#'malformed header    
-                # if parentNode['Size'] < 0:#'unknown-size' element
-                    # raise EbmlUnknownSizeException("Malformed element header while parent is unknown-size element.")
-                # self.read(parentNode['Size'] - self.position)             
-                # return
-            # if type_ is None:#Unknown element
-                # if size < 0:#'unknown-size' element
-                    # if parentNode['Size'] < 0:#'unknown-size' element
-                        # raise EbmlUnknownSizeException("Unknown element (id=%x) with unknown-size while parent is unknown-size element."%id)
-                    # self.read(parentNode['Size'] - self.position)             
-                    # return
-                # self.read(size)
-                # continue
-            # if type_ is SINT:
-                # value = self.readInteger(size, True)
-            # elif type_ is UINT:
-                # value = self.readInteger(size, False)
-            # elif type_ is FLOAT:
-                # value = self.readFloat(size)
-            # elif type_ is STRING:
-                # value = self.read(size).decode('ascii')
-            # elif type_ is UTF8:
-                # value = self.read(size).decode('utf-8')
-            # elif type_ is DATE:
-                # us = self.readInteger(size, True) / 1000.0  # ns to us
-                # from datetime import datetime, timedelta
-                # value = datetime(2001, 1, 1) + timedelta(microseconds=us)
-            # elif type_ is MASTER:
-                # node = {'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_}
-                # parentNode['children'].append(node)
-                # try:
-                    # self._readMasterElement(node[name], node)
-                # except (EbmlUnknownSizeException) as e:
-                    # if parentNode['Size'] < 0:
-                        # raise e
-                    # self.read(parentNode['Size'] - self.position)                                    
-                    # return 
-                # except (EbmlInconsistentEmbeddingException) as e:
-                    # ###if this level is not appropriate to insert:
-                    # ###    raise e
-                    # ###parentNode['children'].append(node)  
-                    # pass
-                # continue    
-            # elif type_ is BINARY:
-                # value = BinaryData(self.read(size))
-            # else:
-                # assert False, type_
-            # parentNode['children'].append({'parent': parentNode, 'size': size, 'id': id, 'name': name, 'type': type_, 'value': value})
-      
-       
-
-
-    
+ 

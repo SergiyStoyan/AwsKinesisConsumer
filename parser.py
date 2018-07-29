@@ -1,26 +1,29 @@
-#by Sergey Stoyan: sergey.stoyan@gmail.com
+'''
+by Sergey Stoyan: sergey.stoyan@gmail.com
 
-#----PYAV based----
+AWS kinesis video stream consumer. 
+Allows to extract video frames.
+
+Based on PyAV (https://github.com/mikeboers/PyAV). 
+'''
 
 from logger import LOG
 import settings
 import os
 import sys
-#import imp
 import boto3
-#import json
-#from datetime import datetime
+import av
 import time
-import cv2#, platform
+import cv2 #can be replaced with Image lib
+#import Image
 import io
 import numpy as np
-#import Image
-import subprocess as sp
-import signal
 import threading
 import ebml
-import copy
+#import copy
 import traceback
+from threading import Thread
+import os.path
 
     
 class Tags:
@@ -35,7 +38,7 @@ class Tags:
     def __str__(self):
         from pprint import pprint, pformat       
         return pformat(vars(self))
-
+    
 class Frame:
     def __init__(self,
                  image,
@@ -53,57 +56,73 @@ class Frame:
         return 'Id:%d\r\nTags:%s\r\nFile:%s\r\nTime:%d'%(self.Id, self.Tags, self.File, self.Time)
 
 class Parser:
+    '''ATTENTION: only methods and variables whose names start with capital letter are designed to be accessed from outside Parser.'''
     
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.dispose()
+        self.Dispose()
 
     def __del__(self):
-        self.dispose()
-        
-    #class Dispose(Exception):
-    #    pass
+        self.Dispose()
 
-    #def dispose_handler(signum, frame):
-    #    raise Dispose
-
-    def dispose(self):
-        if self.disposed:
+    def Dispose(self):
+        if self.disposing:
             return
-        with self.lock:
-            self.disposed = True
+        self.disposing = True
+
+        with self.lock:    
             
             LOG.info('Shutting down Parser...\r\n%s' % '\r\n'.join(traceback.format_stack())) 
             
-            #signal.signal(signal.SIGALRM, self.dispose_handler)
-            signal.alarm(3) # produce SIGALRM in ... seconds
-            
             self.run_kinesis_stream_reader = False
-            try:
-                #self.kinesis_stream.close()
-                pass
-            except:
-                LOG.exception(sys.exc_info()[0])
-
-            try:
-                #if self.kinesis_stream_pipe_W:
-                    #self.kinesis_stream_pipe_W.close()
-                pass
-            except:
-                LOG.exception(sys.exc_info()[0])
-
             self.run_libav_parser = False
-            try:
-                #if self.kinesis_stream_pipe_R:
-                    #self.kinesis_stream_pipe_R.close()
-                pass
-            except:
-                LOG.exception(sys.exc_info()[0])
+            time.sleep(1)
 
-            exit()
+            if self.kinesis_stream:
+                try:
+                    self.kinesis_stream.close()
+                except:
+                    LOG.exception(sys.exc_info()[0])
+                self.kinesis_stream = None
+
+            if self.libav_input_descriptor:
+                try:
+                    self.libav_input_descriptor.close()
+                except:
+                    LOG.exception(sys.exc_info()[0])
+                self.libav_input_descriptor = None    
+                
+            self.libav_output_reader = None  
+                        
+            try:
+                self.kinesis_stream_reader_thread.join(1)
+                if self.kinesis_stream_reader_thread.isAlive():
+                    LOG.error('kinesis_stream_reader_thread has not been stopped!')   
+            except:
+                pass
+
+            try:
+                self.libav_parser_thread.join(1)
+                if self.libav_parser_thread.isAlive():
+                    LOG.error('libav_parser_thread has not been stopped!')   
+            except:
+                pass         
+
+            LOG.info("Parser has been disposed.") 
             
+    def dispose(self):
+        with self.lock:
+            try:
+                if self.dispose_thread and self.dispose_thread.is_alive() or self.disposing:
+                    return
+            except:
+                pass
+            self.dispose_thread = Thread(target = self.Dispose, args = ())
+            self.dispose_thread.daemon = True
+            self.dispose_thread.start() 
+        
         
     def __init__(self,
         stream_name,
@@ -111,22 +130,15 @@ class Parser:
         frame_queue_max_length = 10,
         save_frames2directory = './_frames',
         catch_frames = True,
+        reconnect_max_count = 3,
         ):
         try:
-            LOG.info('STARTED')
-            LOG.info('stream_name: ' + stream_name)
+            LOG.info('Parser starting for %s' % stream_name)
             self.lock = threading.Lock()
-            self.disposed = False
-            self.FrameQueueMaxLength = 10
-            self.TimeSpanBetweenFramesInSecs = -1
-            self.run_kinesis_stream_reader = True
-            self.ffmpeg_process = None
-            self.run_frame_parser = True
-            self.Frames = []
-            self.catch_frames = catch_frames  
-            self.FrameQueueMaxLength = frame_queue_max_length
+            self.disposing = False
+            self.stream_name = stream_name
             self.TimeSpanBetweenFramesInSecs = time_span_between_frames_in_secs
-            self.next_frame_time = time.time()
+            self.FrameQueueMaxLength = frame_queue_max_length
             
             if save_frames2directory == True:
                 save_frames2directory = './_frames'                
@@ -135,145 +147,244 @@ class Parser:
                 if os.path.exists(self.frame_directory):
                     import shutil
                     shutil.rmtree(self.frame_directory)
-                os.makedirs(self.frame_directory)            
-        
-        # client = boto3.client(
-               # service_name = 'kinesisvideo',
-               # region_name = settings.REGION_NAME
-        # )
-        # LOG.info(
-               # client.list_streams(
-               # )
-        # )
-
-            LOG.info('requesting kinesis get_data_endpoint')
-            client = boto3.client(
-                service_name = 'kinesisvideo',
-                region_name = settings.REGION_NAME
-            )
-            response = client.get_data_endpoint(
-                StreamName = stream_name,
-                APIName = 'GET_MEDIA'
-            )
-            LOG.info('response: ' + format(response))
-            endpoint_url = response['DataEndpoint']
-        
-            LOG.info('requesting kinesis get_media')
-            client = boto3.client(
-                service_name = 'kinesis-video-media',
-                endpoint_url = endpoint_url,
-                region_name = settings.REGION_NAME,
-            )
-            response = client.get_media(
-                StreamName = stream_name,
-                StartSelector = {
-                    'StartSelectorType': 'NOW',
-                }
-            )
-            LOG.info('response: ' + format(response))
-            self.kinesis_stream = response['Payload']
-                        
-            kinesis_stream_pipe = r'/tmp/testFifo'
-            try:                                
-                os.remove(kinesis_stream_pipe)
-            except:
-                pass
-            os.mkfifo(kinesis_stream_pipe)
+                os.makedirs(self.frame_directory)  
             
+            self.catch_frames = catch_frames  
+            self.reconnect_max_count = reconnect_max_count
+
             self.next_frame_time = 0.0
-
-            LOG.info('starting kinesis_stream_reader')
-            from threading import Thread
-            kinesis_stream_reader_thread = Thread(target = self.kinesis_stream_reader, args = (self.kinesis_stream, kinesis_stream_pipe,))
-            self.run_kinesis_stream_reader = True
-            kinesis_stream_reader_thread.start()  
-
-            LOG.info('starting libav_parser')
-            from threading import Thread
-            libav_parser_thread = Thread(target = self.libav_parser, args = (kinesis_stream_pipe,))
-            self.run_libav_parser = True
-            libav_parser_thread.start()  
+            self.Frames = []      
+            self.last_frame_id = 0
+            self.tags_line = []
+            self.last_packet_tags = None
+            self.reconnect_count = 0
+            self.refresh_count = 0
+            self.kinesis_stream = None
+            self.libav_input_descriptor = None
+            self.kinesis_stream_reader_thread = None
+            self.libav_parser_thread = None
+            self.kinesis_stream_pipe = r'/tmp/AwsKinesisParserFifo'
+            self.starter(False)
                 
         except:
             LOG.exception(sys.exc_info()[0])
         finally:
             pass
-            
-    def kinesis_stream_reader(self,
-        kinesis_stream,
-        kinesis_stream_pipe
+
+    
+    def starter(self,  
+               count_attempt
     ):
-        try:  
-            LOG.info('started kinesis_stream_reader')
+        if self.disposing:
+            return
+        
+        with self.lock:
+            try:
+                if self.starter_thread and self.starter_thread.is_alive():
+                    return
+            except:
+                pass
+        
+            LOG.info('[Re-]starting connection to kinesis stream...\r\nreconnect_count=%d\r\nrefresh_count=%d\r\ncount_attempt=%s\r\n%s' % (self.reconnect_count, self.refresh_count, count_attempt, '\r\n'.join(traceback.format_stack())))
+      
+            self.starter_thread = Thread(target = self.starter_, args = (count_attempt,))
+            self.starter_thread.daemon = True
+            self.starter_thread.start()  
 
-            self.kinesis_stream_pipe_W = open(kinesis_stream_pipe, 'w')
+    def starter_(self,  
+              count_attempt
+    ):
+        try:   
+            if self.disposing:
+                return                            
 
-            interestingElementNames = [
-                 'Segment', 
-                # 'Cluster',
-                # 'Tags',
-                # 'Tag',
-                # 'SimpleTag',
-                 'TagName',
-                 'TagString',
-                # 'CodecID',
-                # 'CodecName',
-                # 'PixelWidth',
-                # 'PixelHeight',
-                # 'Video',
-                # 'TrackEntry',
-                # 'Tracks',
-    # 'Timecode',
-    # 'Position',
-    # 'PrevSize',
-    #'CodecPrivate',
-    #'BlockGroup', 
-    #'Block', 
-    #'BlockVirtual',
-    #'SimpleBlock', 
-    #'BlockDuration',
-    #'Slices', 
-    #'BlockAdditions',
-    'DocTypeReadVersion'#last tag in segment
-            ]
-            #interestingElementNames = None
-            er = ebml.EbmlReader(kinesis_stream, interestingElementNames)#, self.print_ebml_element_head)
+            #stop and clean everything before [re-]starting
+
+            self.run_kinesis_stream_reader = False            
+            if self.kinesis_stream:
+                try:
+                    self.kinesis_stream.close()
+                except:
+                    LOG.exception(sys.exc_info()[0])
+                self.kinesis_stream = None
+
+            if self.libav_input_descriptor:
+                try:                    
+                    #(it was checked:) after closing pipe input, libav will still read all the packets until EOF
+                    LOG.info('Closing libav_input_descriptor...')
+                    self.libav_input_descriptor.close()
+                except:
+                    LOG.exception(sys.exc_info()[0])
+                self.libav_input_descriptor = None               
+                
+            if count_attempt:
+                self.reconnect_count += 1
+            else:
+                self.refresh_count += 1
+            if self.reconnect_count > self.reconnect_max_count:
+                LOG.warning('Stopping on reconnect count > %d' % self.reconnect_max_count)
+                return               
                         
-            self.tagLine = []
-            tags = Tags()            
-            er.CopyBuffer = io.BytesIO()
-            lastTagName = None 
-            while self.run_kinesis_stream_reader:    
-                size, id, name, type_, value = er.ReadNextElement()
-                #self.print_ebml_element(size, id, name, type_, value)
-                if name == 'Segment': 
-                    pass
-                elif name == 'TagName':
-                    lastTagName = value
-                elif name == 'TagString' and hasattr(tags, lastTagName):
-                    setattr(tags, lastTagName, value)
-                elif name == 'DocTypeReadVersion': 
-                    tags.position = er.position                    
-                    with self.lock:
-                        self.tagLine.append(tags)
-                    tags = Tags()
+            self.set_kinesis_stream()
+                        
+            if self.libav_parser_thread:
+                LOG.info("Wating libav_parser_thread to read remaining packets and stop...") 
+                self.libav_parser_thread.join()
+                self.libav_parser_thread = None              
+                LOG.info("libav_parser_thread has been stopped.")  
+            self.libav_output_reader = None 
 
-                    bs = er.CopyBuffer.getvalue()
-                    #LOG.info('=====================CopyBuffer: %d, %d'%(len(bs), er.position))
-                    self.kinesis_stream_pipe_W.write(bs)
-                    self.kinesis_stream_pipe_W.flush()
-                    er.CopyBuffer.close()
-                    er.CopyBuffer = io.BytesIO()  
+            if self.kinesis_stream_reader_thread:
+                LOG.info("Wating kinesis_stream_reader_thread to stop...") 
+                self.kinesis_stream_reader_thread.join()
+                self.kinesis_stream_reader_thread = None              
+                LOG.info("kinesis_stream_reader_thread has been stopped.") 
+            
+            self.tags_line = []
+
+            if os.path.exists(self.kinesis_stream_pipe):
+                os.remove(self.kinesis_stream_pipe)#clean the pipe if it remains with data after Parser interruption
+            os.mkfifo(self.kinesis_stream_pipe) 
+                            
+            self.run_kinesis_stream_reader = True
+            self.kinesis_stream_reader_thread = Thread(target = self.kinesis_stream_reader, args = ())
+            self.kinesis_stream_reader_thread.daemon = True
+            self.kinesis_stream_reader_thread.start()  
+
+            self.run_libav_parser = True
+            self.libav_parser_thread = Thread(target = self.libav_parser, args = ())
+            self.libav_parser_thread.daemon = True
+            self.libav_parser_thread.start() 
 
         except:
             LOG.exception(sys.exc_info()[0])
-        finally:
-            LOG.info('end of kinesis_stream_reader')
             self.dispose()
+
+        finally:            
+            pass
+
+
+    def set_kinesis_stream(self):
+        LOG.info('Requesting kinesis get_data_endpoint...')
+        client = boto3.client(
+            service_name = 'kinesisvideo',
+            region_name = settings.REGION_NAME
+        )
+        response = client.get_data_endpoint(
+            StreamName = self.stream_name,
+            APIName = 'GET_MEDIA'
+        )
+        LOG.info('Response: ' + format(response))
+        endpoint_url = response['DataEndpoint']
+        
+        LOG.info('Requesting kinesis get_media...')
+        client = boto3.client(
+            service_name = 'kinesis-video-media',
+            endpoint_url = endpoint_url,
+            region_name = settings.REGION_NAME,
+        )
+        
+        with self.lock:
+            if self.last_packet_tags:
+                startSelector = {
+                    'StartSelectorType': 'CONTINUATION_TOKEN',
+                    'ContinuationToken': self.last_packet_tags.AWS_KINESISVIDEO_CONTINUATION_TOKEN,
+                }
+                LOG.info('Continue reading since: %s' % startSelector['ContinuationToken'])
+            else:
+                startSelector = {
+                    'StartSelectorType': 'NOW',
+                }
+                LOG.info('Start reading since NOW')
+
+        response = client.get_media(
+            StreamName = self.stream_name,
+            StartSelector = startSelector,
+        )
+        LOG.info('Response: ' + format(response))
+        self.kinesis_stream = response['Payload']
+
+    
+    def kinesis_stream_reader(self,
+    ):
+        try: 
+            LOG.info('kinesis_stream_reader started') 
+            
+            if not self.run_kinesis_stream_reader: 
+                return
+            
+            interestingElementNames = [
+                 'Segment', 
+                # 'Cluster',
+                 'TagName',
+                 'TagString',
+                'DocTypeReadVersion'#last tag in segment
+            ]
+            #interestingElementNames = None
+            ebmlReader = ebml.EbmlReader(self.kinesis_stream, interestingElementNames)#, self.print_ebml_element_head)
+
+            self.libav_input_descriptor = open(self.kinesis_stream_pipe, 'w') 
+
+            tags = Tags()
+            ebmlReader.CopyBuffer = io.BytesIO()
+            lastTagName = None 
+            while self.run_kinesis_stream_reader:    
+                size, id, name, type_, value = ebmlReader.ReadNextElement()
+                #self.print_ebml_element(size, id, name, type_, value)
+
+                #TEST
+                #if ebmlReader.Position > 30000000:
+                #    f = self.GetLastFrame()
+                #    LOG.info('>>>>>>>>>>>>>>>>>>>>>>>>>>>Last frame: %s' % f)
+                #    raise Exception("restart test")
+
+                if name == 'Segment': 
+                    pass
+
+                elif name == 'TagName':
+                    lastTagName = value
+                elif name == 'TagString':
+                    if hasattr(tags, lastTagName):
+                        setattr(tags, lastTagName, value)
+                    elif lastTagName == 'AWS_KINESISVIDEO_ERROR_CODE':
+                        LOG.error('AWS_KINESISVIDEO_ERROR_CODE: %s' % value)
+                    elif lastTagName == 'AWS_KINESISVIDEO_ERROR_ID':
+                        LOG.error('AWS_KINESISVIDEO_ERROR_ID: %s' % value)
+                        
+                elif name == 'DocTypeReadVersion': 
+                    tags.position = ebmlReader.Position                    
+                    with self.lock:
+                        self.tags_line.append(tags)
+                    tags = Tags()
+
+                    bs = ebmlReader.CopyBuffer.getvalue()
+                    #LOG.info('=====================CopyBuffer: %d, %d'%(len(bs), ebmlReader.Position))
+                    self.libav_input_descriptor.write(bs)
+                    self.libav_input_descriptor.flush()
+                    #os.write(self.libav_input_descriptor, bs)
+                    #os.flush(self.libav_input_descriptor)
+                    ebmlReader.CopyBuffer.close()
+                    ebmlReader.CopyBuffer = io.BytesIO()  
+
+        except:      
+            LOG.exception(sys.exc_info()[0])
+
+        finally:
+            LOG.info('kinesis_stream_reader exiting...:\r\run_kinesis_stream_reader=%s' % (self.run_kinesis_stream_reader))
+            try:
+                if ebmlReader and ebmlReader.Position > 1000000:
+                    self.starter(False)
+                    return
+            except:
+                pass
+            self.starter(True)
+        
+
 
     def print_ebml_element_head(self, ebmlParser, size,  id, name, type_):
         LOG.info('position: %d, size:%d, id:%s, name:%s, type_:%s' % (ebmlParser.position, size, hex(id), name, type_))
             
+
     def print_ebml_element(self, size, id, name, type_, value):
         #if type_ != ebml.BINARY:
         #    LOG.info('value: %s' % (value))
@@ -282,45 +393,52 @@ class Parser:
         if type_ != ebml.BINARY:
             LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, value))
         else:
-            LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, '<BINARY>'))             
-
+            LOG.info('name:%s, size:%d, id:%s, type_:%s, value: %s' % (name, size, hex(id), type_, '<BINARY>')) 
             
-    def libav_parser(self,
-        kinesis_stream_pipe
+            
+    def libav_parser(self,       
     ):  
         try:
-            LOG.info('started libav_parser')
-            #packet_count = 0
-            import av
-            self.kinesis_stream_pipe_R = av.open(kinesis_stream_pipe)
-            for packet in self.kinesis_stream_pipe_R.demux(video=0):
+            LOG.info('libav_parser started')
+
+            if not self.run_libav_parser:
+                return
+
+            self.libav_output_reader = av.open(self.kinesis_stream_pipe)
+            LOG.info('kinesis_stream_pipe opened for reading')
+            for packet in self.libav_output_reader.demux(video=0):
                 if not self.run_libav_parser:
-                    break
+                    return
+
                 with self.lock:
                     tags_i = -1
-                    for i, t in enumerate(self.tagLine):
+                    for i, t in enumerate(self.tags_line):
                         if t.position > packet.pos:    
                             tags_i = i
                             break
-                    #print('len(self.tagLine):%d'%len(self.tagLine))
+                    #print('len(self.tags_line):%d'%len(self.tags_line))
                     if tags_i < 0:
                         LOG.error('No tag for packet!')
                     else:
-                        tags = self.tagLine[tags_i]
-                        del self.tagLine[ : tags_i]
-                #print('i:%d'%packet_count)#about 850 packet for 35 secs if no further processing
+                        self.last_packet_tags = self.tags_line[tags_i]
+                        del self.tags_line[ : tags_i]
+
                 if not self.catch_frames:  
-                    continue            
-                for frame in packet.decode(): 
-                    #print('i:%d'%frame.index)#about 180 frames for 35 secs if no fursther processing
-                    #self.catch_frame(tags, frame.to_image(), frame.index) #slow: processes about 70 frames for 35secs!!!
-                    self.catch_frame(tags, frame.to_nd_array(format='bgr24'), frame.index) #a bit faster (about 100 frames for 35secs) but it slows down 2 times against that when it is absent 
+                    continue 
+                
+                for frame in packet.decode():
+                    if not self.run_libav_parser:
+                        break
+                    self.last_frame_id += 1
+                    #self.catch_frame(self.last_packet_tags, frame.to_image(), self.last_frame_id) #about 70/100 slower
+                    self.catch_frame(self.last_packet_tags, frame.to_nd_array(format='bgr24'), self.last_frame_id) 
                 
         except:
             LOG.exception(sys.exc_info()[0])
+
         finally:
-            LOG.info('end of libav_parser')
-            self.dispose()
+            LOG.info('libav_parser exiting...:\r\nrun_libav_parser=%s' % (self.run_libav_parser, ))
+            self.starter(True)
 
             
     def catch_frame(self,
@@ -348,7 +466,7 @@ class Parser:
 
             if len(self.Frames) > self.FrameQueueMaxLength:
                 i = self.Frames[0]
-                try:# file can be in use or deleted
+                try:# file might be in use or deleted
                     os.remove(i['file'])
                 except:
                     pass
@@ -356,45 +474,61 @@ class Parser:
                 
             if self.frame_directory:
                 #image.save(frame_file)                
-                cv2.imwrite(frame_file, image)#slow!!!
+                cv2.imwrite(frame_file, image)
                 pass
 
                             
     def GetFrame(self,
-                 index = None  #last one
+                 index
                  ):
-        '''this method is thread safe and can be used to access self.Frames anytime.'''
+        '''This method is thread safe and can be used to access self.Frames anytime.'''
         with self.lock:
             try:
                 l = len(self.Frames)
-                if not index:
-                    index = l - 1
                 if index < 0 or index >= l:
                     return None
                 return self.Frames[index]
             except:
                 LOG.exception(sys.exc_info()[0])
-
+          
+    def GetLastFrame(self
+                 ):
+        '''This method is thread safe and can be used to access self.Frames anytime.'''
+        with self.lock:
+            try:
+                index = len(self.Frames) - 1
+                if index < 0:
+                    return None
+                return self.Frames[index]
+            except:
+                LOG.exception(sys.exc_info()[0])
 
     def StartCatchFrames(self,
                 ):
-        '''this method must be called before direct accessing to self.Frames, to avoid concurrency.'''
         with self.lock:
             self.catch_frames = True
                
     def StopCatchFrames(self,
                ):
+        '''ATTENTION: before directly accessing Parser::Frames, this method must be called to avoid concurrency.'''
         with self.lock:
             self.catch_frames = False
 
     
 #USAGE example
 if __name__ == '__main__':#not to run when this module is imported
-    import sys
     if len(sys.argv) > 1:
         stream_name = sys.argv[1]
+        
+    import signal
+    def signal_handler(sig, frame):
+        print('Pressed Ctrl+C')
+        signal.alarm(3) # produce SIGALRM in ... seconds
+        sys.exit(0)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     with Parser(
-        stream_name = 'test8',
+        stream_name = 'test11',
         time_span_between_frames_in_secs = -0.3,
         frame_queue_max_length = 20,
         save_frames2directory = False,
@@ -403,22 +537,33 @@ if __name__ == '__main__':#not to run when this module is imported
                 
         #time.sleep(1)
         #f = p.GetFrame(0)#thread safe method
-        #print("First frame: %s" % f)
+        #print('First frame: %s' % f)
 
         time.sleep(3)
-        f = p.GetFrame()#get the last frame
-        print("Last frame: %s" % f)
+        f = p.GetLastFrame()
+        print('Last frame: %s' % f)
 
         #p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
         #for f in p.Frames:
-        #    print("Frame: %s" % f)
+        #    print('Frame: %s' % f)
         
-        lastId = f.Id
-        for i in range(0, 180):
-        #p.StartCatchFrames()
-            time.sleep(10)
-            f = p.GetFrame()#get the last frame
-            print("Last frame: %s" % f)
-            print("Caught frames: %d" % (f.Id - lastId))
+        p.StartCatchFrames()
+        if f:
             lastId = f.Id
+        else:
+            lastId = 0
+         
+        import datetime   
+        last_time = datetime.datetime.now()
+        for i in range(0, 360):
+            time.sleep(10)
+            f = p.GetLastFrame()
+            if f:
+                elapsed_time = datetime.datetime.now() - last_time
+                LOG.info('Caught frames for %f secs: %d' % (elapsed_time.total_seconds(), f.Id - lastId))
+                last_time = datetime.datetime.now()
+                lastId = f.Id
+                LOG.info('Last frame: %s' % f)
+            else:
+                LOG.info('No frame')
     exit()
