@@ -130,7 +130,7 @@ class Parser:
         frame_queue_max_length = 10,
         save_frames2directory = './_frames',
         catch_frames = True,
-        reconnect_max_count = 3,
+        reconnect_max_count = 3,#ignored when refreshing connection due to AWS kinesis time limit
         ):
         try:
             LOG.info('Parser starting for %s' % stream_name)
@@ -222,7 +222,7 @@ class Parser:
             else:
                 self.refresh_count += 1
             if self.reconnect_count > self.reconnect_max_count:
-                LOG.warning('Stopping on reconnect count > %d' % self.reconnect_max_count)
+                LOG.warning('Stopping because reconnect count exceeded %d...' % self.reconnect_max_count)
                 return               
                         
             self.set_kinesis_stream()
@@ -418,7 +418,7 @@ class Parser:
                             break
                     #print('len(self.tags_line):%d'%len(self.tags_line))
                     if tags_i < 0:
-                        LOG.error('No tag for packet!')
+                        raise Exception('No tag for packet!')
                     else:
                         self.last_packet_tags = self.tags_line[tags_i]
                         del self.tags_line[ : tags_i]
@@ -543,7 +543,7 @@ if __name__ == '__main__':#not to run when this module is imported
         f = p.GetLastFrame()
         print('Last frame: %s' % f)
 
-        #p.StopCatchFrames()        #p.Frames must be accessed only after StopCatchFrames() to avoid concurrency!!!
+        #p.StopCatchFrames()        #!!!p.Frames should be accessed only after StopCatchFrames() to avoid concurrency!!!
         #for f in p.Frames:
         #    print('Frame: %s' % f)
         
@@ -555,12 +555,12 @@ if __name__ == '__main__':#not to run when this module is imported
          
         import datetime   
         last_time = datetime.datetime.now()
+
         for i in range(0, 360):
             time.sleep(10)
             f = p.GetLastFrame()
             if f:
-                elapsed_time = datetime.datetime.now() - last_time
-                LOG.info('Caught frames for %f secs: %d' % (elapsed_time.total_seconds(), f.Id - lastId))
+                LOG.info('Caught frames for %f secs: %d' % ((datetime.datetime.now() - last_time).total_seconds(), f.Id - lastId))
                 last_time = datetime.datetime.now()
                 lastId = f.Id
                 LOG.info('Last frame: %s' % f)
