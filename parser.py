@@ -98,12 +98,12 @@ class Parser:
             self.libav_output_reader = None  
                 
             if self.kinesis_stream_reader_thread:
-                self.kinesis_stream_reader_thread.join(1)
+                self.kinesis_stream_reader_thread.join(3)
                 if self.kinesis_stream_reader_thread.isAlive(): 
                     raise Exception('kinesis_stream_reader_thread has not stopped!')   
 
             if self.libav_parser_thread:
-                self.libav_parser_thread.join(1)
+                self.libav_parser_thread.join(3)
                 if self.libav_parser_thread.isAlive():
                     raise Exception('libav_parser_thread has not stopped!')   
 
@@ -132,7 +132,10 @@ class Parser:
         try:
             LOG.info('Parser starting for %s' % stream_name)
             self.lock = threading.Lock()
+            self.frames_lock = threading.Lock()
+            self.tags_lock = threading.Lock()
             self.disposing = False
+
             self.stream_name = stream_name
             self.TimeSpanBetweenFramesInSecs = time_span_between_frames_in_secs
             self.FrameQueueMaxLength = frame_queue_max_length
@@ -237,7 +240,7 @@ class Parser:
                 self.kinesis_stream_reader_thread = None              
                 LOG.info("kinesis_stream_reader_thread has been stopped.") 
             
-            with self.lock:
+            with self.tags_lock:
                 self.tags_line = []
                 self.last_packet_tags = None #the main use apart, it shows if at least one packet was read after [re-]connection
 
@@ -283,7 +286,7 @@ class Parser:
             region_name = settings.REGION_NAME,
         )
         
-        with self.lock:
+        with self.tags_lock:
             if self.last_packet_tags:
                 startSelector = {
                     'StartSelectorType': 'CONTINUATION_TOKEN',
@@ -355,7 +358,7 @@ class Parser:
                         
                 elif name == 'DocTypeReadVersion': 
                     tags.position = ebmlReader.Position                    
-                    with self.lock:
+                    with self.tags_lock:
                         self.tags_line.append(tags)
                     tags = Tags()
 
@@ -412,7 +415,7 @@ class Parser:
                 if not self.run_libav_parser:
                     return
 
-                with self.lock:
+                with self.tags_lock:
                     tags_i = -1
                     for i, t in enumerate(self.tags_line):
                         if t.position > packet.pos:    
@@ -461,7 +464,7 @@ class Parser:
         else:
             frame_file = None               
 
-        with self.lock:
+        with self.frames_lock:
             f = Frame(image, frame_id, tags, frame_file)             
             #LOG.info(f)             
             self.Frames.append(f)
@@ -484,7 +487,7 @@ class Parser:
                  index
                  ):
         '''This method is thread safe and can be used to access self.Frames anytime.'''
-        with self.lock:
+        with self.frames_lock:
             try:
                 l = len(self.Frames)
                 if index < 0 or index >= l:
@@ -496,7 +499,7 @@ class Parser:
     def GetLastFrame(self
                  ):
         '''This method is thread safe and can be used to access self.Frames anytime.'''
-        with self.lock:
+        with self.frames_lock:
             try:
                 index = len(self.Frames) - 1
                 if index < 0:
@@ -507,13 +510,13 @@ class Parser:
 
     def StartCatchFrames(self,
                 ):
-        with self.lock:
+        with self.frames_lock:
             self.catch_frames = True
                
     def StopCatchFrames(self,
                ):
         '''ATTENTION: before directly accessing Parser::Frames, this method must be called to avoid concurrency.'''
-        with self.lock:
+        with self.frames_lock:
             self.catch_frames = False
 
     
