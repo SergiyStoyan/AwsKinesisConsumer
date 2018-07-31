@@ -99,15 +99,13 @@ class Parser:
                 
             if self.kinesis_stream_reader_thread:
                 self.kinesis_stream_reader_thread.join(1)
-                if self.kinesis_stream_reader_thread.isAlive():
-                    #LOG.error('kinesis_stream_reader_thread has not been stopped!')   
-                    raise Exception('kinesis_stream_reader_thread could not be stopped!')   
+                if self.kinesis_stream_reader_thread.isAlive(): 
+                    raise Exception('kinesis_stream_reader_thread has not stopped!')   
 
             if self.libav_parser_thread:
                 self.libav_parser_thread.join(1)
                 if self.libav_parser_thread.isAlive():
-                    #LOG.error('libav_parser_thread has not been stopped!')   
-                    raise Exception('libav_parser_thread could not be stopped!')   
+                    raise Exception('libav_parser_thread has not stopped!')   
 
             LOG.info("Parser has been disposed.") 
             
@@ -239,8 +237,9 @@ class Parser:
                 self.kinesis_stream_reader_thread = None              
                 LOG.info("kinesis_stream_reader_thread has been stopped.") 
             
-            self.tags_line = []
-            self.last_packet_tags = None #the main use apart, it shows if at least one packet was read after [re-]connection
+            with self.lock:
+                self.tags_line = []
+                self.last_packet_tags = None #the main use apart, it shows if at least one packet was read after [re-]connection
 
             if os.path.exists(self.kinesis_stream_pipe):
                 os.remove(self.kinesis_stream_pipe)#clean the pipe if it remains with data after Parser interruption
@@ -307,7 +306,10 @@ class Parser:
     
     def kinesis_stream_reader(self,
     ):
-        try: 
+        try:     
+            if self.disposing:
+                return
+
             LOG.info('kinesis_stream_reader started') 
             
             if not self.run_kinesis_stream_reader: 
@@ -395,7 +397,10 @@ class Parser:
             
     def libav_parser(self,       
     ):  
-        try:
+        try:     
+            if self.disposing:
+                return
+
             LOG.info('libav_parser started')
 
             if not self.run_libav_parser:
