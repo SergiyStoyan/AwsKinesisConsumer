@@ -131,6 +131,7 @@ class Parser:
         ):
         try:
             LOG.info('Parser starting for %s' % stream_name)
+
             self.lock = threading.Lock()
             self.frames_lock = threading.Lock()
             self.tags_lock = threading.Lock()
@@ -153,10 +154,12 @@ class Parser:
             self.reconnect_max_count = reconnect_max_count
 
             self.next_frame_time = 0.0
-            self.Frames = []      
+            with self.frames_lock:
+                self.Frames = [] 
+            with self.tags_lock:
+                self.tags_line = []
+                self.last_packet_tags = None
             self.last_frame_id = 0
-            self.tags_line = []
-            self.last_packet_tags = None
             self.connection_attempts_count = 0
             self.connection_renewals_count = 0
             self.kinesis_stream = None
