@@ -96,20 +96,18 @@ class Parser:
                 self.libav_input_descriptor = None    
                 
             self.libav_output_reader = None  
-                        
-            try:
+                
+            if self.kinesis_stream_reader_thread:
                 self.kinesis_stream_reader_thread.join(1)
                 if self.kinesis_stream_reader_thread.isAlive():
-                    LOG.error('kinesis_stream_reader_thread has not been stopped!')   
-            except:
-                pass
+                    #LOG.error('kinesis_stream_reader_thread has not been stopped!')   
+                    raise Exception('kinesis_stream_reader_thread could not be stopped!')   
 
-            try:
+            if self.libav_parser_thread:
                 self.libav_parser_thread.join(1)
                 if self.libav_parser_thread.isAlive():
-                    LOG.error('libav_parser_thread has not been stopped!')   
-            except:
-                pass         
+                    #LOG.error('libav_parser_thread has not been stopped!')   
+                    raise Exception('libav_parser_thread could not be stopped!')   
 
             LOG.info("Parser has been disposed.") 
             
@@ -158,8 +156,8 @@ class Parser:
             self.last_frame_id = 0
             self.tags_line = []
             self.last_packet_tags = None
-            self.reconnect_count = 0
-            self.refresh_count = 0
+            self.connection_attempts_count = 0
+            self.connection_renewals_count = 0
             self.kinesis_stream = None
             self.libav_input_descriptor = None
             self.kinesis_stream_reader_thread = None
@@ -174,7 +172,7 @@ class Parser:
 
     
     def starter(self,  
-               count_attempt
+               count_connection_attempt
     ):
         if self.disposing:
             return
@@ -186,14 +184,14 @@ class Parser:
             except:
                 pass
         
-            LOG.info('[Re-]starting connection to kinesis stream...\r\nreconnect_count=%d\r\nrefresh_count=%d\r\ncount_attempt=%s\r\n%s' % (self.reconnect_count, self.refresh_count, count_attempt, '\r\n'.join(traceback.format_stack())))
+            LOG.info('[Re-]starting connection to kinesis stream...\r\nconnection_attempts_count=%d\r\nconnection_renewals_count=%d\r\ncount_connection_attempt=%s\r\n%s' % (self.connection_attempts_count, self.connection_renewals_count, count_connection_attempt, '\r\n'.join(traceback.format_stack())))
       
-            self.starter_thread = Thread(target = self.starter_, args = (count_attempt,))
+            self.starter_thread = Thread(target = self.starter_, args = (count_connection_attempt,))
             self.starter_thread.daemon = True
             self.starter_thread.start()  
 
     def starter_(self,  
-              count_attempt
+              count_connection_attempt
     ):
         try:   
             if self.disposing:
@@ -218,11 +216,11 @@ class Parser:
                     LOG.exception(sys.exc_info()[0])
                 self.libav_input_descriptor = None               
                 
-            if count_attempt:
-                self.reconnect_count += 1
+            if count_connection_attempt:
+                self.connection_attempts_count += 1
             else:
-                self.refresh_count += 1
-            if self.reconnect_count > self.reconnect_max_count:
+                self.connection_renewals_count += 1
+            if self.connection_attempts_count > self.reconnect_max_count:
                 LOG.warning('Stopping because reconnect count exceeded %d...' % self.reconnect_max_count)
                 return               
                         
@@ -242,6 +240,7 @@ class Parser:
                 LOG.info("kinesis_stream_reader_thread has been stopped.") 
             
             self.tags_line = []
+            self.last_packet_tags = None #the main use apart, it shows if at least one packet was read after [re-]connection
 
             if os.path.exists(self.kinesis_stream_pipe):
                 os.remove(self.kinesis_stream_pipe)#clean the pipe if it remains with data after Parser interruption
@@ -372,13 +371,10 @@ class Parser:
 
         finally:
             LOG.info('kinesis_stream_reader exiting...:\r\nrun_kinesis_stream_reader=%s' % (self.run_kinesis_stream_reader))
-            try:
-                if ebmlReader and ebmlReader.Position > 1000000:
-                    self.starter(False)
-                    return
-            except:
-                pass
-            self.starter(True)
+            if self.last_packet_tags:#the last connection was successful
+                self.starter(False)
+            else:
+                self.starter(True)
         
 
 
